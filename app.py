@@ -35,6 +35,7 @@ class MemoryOptimizedStockApp:
         self.visualizer = None
         self.analysis_count = 0
         self._initialize_components()
+        self._initialize_session_state()
     
     def _initialize_components(self):
         """Initialize components with memory optimization"""
@@ -46,6 +47,23 @@ class MemoryOptimizedStockApp:
         except Exception as e:
             st.error(f"❌ Component initialization failed: {e}")
             st.stop()
+    
+    def _initialize_session_state(self):
+        """Initialize all required session state variables"""
+        if 'current_symbol' not in st.session_state:
+            st.session_state.current_symbol = 'AAPL'
+        if 'period' not in st.session_state:
+            st.session_state.period = '3mo'
+        if 'use_technical_indicators' not in st.session_state:
+            st.session_state.use_technical_indicators = True
+        if 'use_sentiment_analysis' not in st.session_state:
+            st.session_state.use_sentiment_analysis = True
+        if 'use_advanced_model' not in st.session_state:
+            st.session_state.use_advanced_model = True
+        if 'analysis_count' not in st.session_state:
+            st.session_state.analysis_count = 0
+        if 'current_cache_key' not in st.session_state:
+            st.session_state.current_cache_key = ''
     
     def _get_memory_usage(self):
         """Get current memory usage in MB"""
@@ -78,12 +96,14 @@ class MemoryOptimizedStockApp:
             if hasattr(self, 'sentiment_analyzer') and self.sentiment_analyzer:
                 self.sentiment_analyzer.cleanup()
             
-            # Clear session state data
-            keys_to_keep = ['current_symbol', 'analysis_count']
-            keys_to_delete = [key for key in st.session_state.keys() if key not in keys_to_keep]
+            # Clear session state data except essential variables
+            essential_keys = ['current_symbol', 'period', 'use_technical_indicators', 
+                            'use_sentiment_analysis', 'use_advanced_model', 'analysis_count']
+            keys_to_delete = [key for key in st.session_state.keys() if key not in essential_keys]
             
             for key in keys_to_delete:
-                del st.session_state[key]
+                if key in st.session_state:
+                    del st.session_state[key]
             
             # Force garbage collection
             gc.collect()
@@ -174,18 +194,22 @@ class MemoryOptimizedStockApp:
         st.sidebar.title("⚙️ Configuration")
         
         # Stock symbol input
-        symbol = st.sidebar.text_input("Enter Stock Symbol", "AAPL").upper()
+        symbol = st.sidebar.text_input("Enter Stock Symbol", st.session_state.current_symbol).upper()
         st.session_state.current_symbol = symbol
         
         # Analysis period
-        period = st.sidebar.selectbox("Data Period", ["1mo", "3mo", "6mo"], index=1)
+        period = st.sidebar.selectbox("Data Period", ["1mo", "3mo", "6mo"], 
+                                    index=["1mo", "3mo", "6mo"].index(st.session_state.period))
         st.session_state.period = period
         
         # Features
         st.sidebar.subheader("🎯 Features")
-        use_technical_indicators = st.sidebar.checkbox("Technical Indicators", True)
-        use_sentiment_analysis = st.sidebar.checkbox("Sentiment Analysis", True)
-        use_advanced_model = st.sidebar.checkbox("Enhanced AI Model", True)
+        use_technical_indicators = st.sidebar.checkbox("Technical Indicators", 
+                                                     st.session_state.use_technical_indicators)
+        use_sentiment_analysis = st.sidebar.checkbox("Sentiment Analysis", 
+                                                   st.session_state.use_sentiment_analysis)
+        use_advanced_model = st.sidebar.checkbox("Enhanced AI Model", 
+                                               st.session_state.use_advanced_model)
         
         st.session_state.use_technical_indicators = use_technical_indicators
         st.session_state.use_sentiment_analysis = use_sentiment_analysis
