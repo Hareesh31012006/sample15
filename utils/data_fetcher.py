@@ -35,15 +35,61 @@ class DataFetcher:
             st.error(f"Error fetching data for {symbol}: {e}")
             return None
     
-    def get_stock_data_alpha_vantage(self, symbol):
-        """Fetch stock data from Alpha Vantage with real API key"""
+    def calculate_technical_indicators(self, df):
+        """Calculate technical indicators using pure Python (no TA-Lib)"""
         try:
-            ts = TimeSeries(key=self.alpha_vantage_key, output_format='pandas')
-            data, meta_data = ts.get_daily(symbol=symbol, outputsize='compact')
-            return data
+            # RSI - Relative Strength Index
+            df['rsi'] = self._calculate_rsi(df['Close'])
+            
+            # MACD - Moving Average Convergence Divergence
+            macd, macd_signal, macd_hist = self._calculate_macd(df['Close'])
+            df['macd'] = macd
+            df['macd_signal'] = macd_signal
+            df['macd_hist'] = macd_hist
+            
+            # Moving Averages
+            df['sma_20'] = df['Close'].rolling(window=20).mean()
+            df['sma_50'] = df['Close'].rolling(window=50).mean()
+            
+            # Bollinger Bands
+            bb_upper, bb_middle, bb_lower = self._calculate_bollinger_bands(df['Close'])
+            df['bb_upper'] = bb_upper
+            df['bb_middle'] = bb_middle
+            df['bb_lower'] = bb_lower
+            
+            # Volume indicators
+            df['volume_sma'] = df['Volume'].rolling(window=20).mean()
+            
         except Exception as e:
-            st.error(f"Alpha Vantage error: {e}")
-            return None
+            st.warning(f"Error calculating technical indicators: {e}")
+        
+        return df
+    
+    def _calculate_rsi(self, prices, window=14):
+        """Calculate RSI using pure Python"""
+        delta = prices.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
+    
+    def _calculate_macd(self, prices, fast=12, slow=26, signal=9):
+        """Calculate MACD using pure Python"""
+        ema_fast = prices.ewm(span=fast).mean()
+        ema_slow = prices.ewm(span=slow).mean()
+        macd = ema_fast - ema_slow
+        macd_signal = macd.ewm(span=signal).mean()
+        macd_hist = macd - macd_signal
+        return macd, macd_signal, macd_hist
+    
+    def _calculate_bollinger_bands(self, prices, window=20, num_std=2):
+        """Calculate Bollinger Bands using pure Python"""
+        middle = prices.rolling(window=window).mean()
+        std = prices.rolling(window=window).std()
+        upper = middle + (std * num_std)
+        lower = middle - (std * num_std)
+        return upper, middle, lower
     
     def get_news_data(self, symbol, days=7):
         """Fetch news data using GNews API with Yahoo fallback"""
@@ -127,44 +173,6 @@ class DataFetcher:
                 'description': f'{symbol} unveils innovative product line expected to drive future growth.',
                 'published_at': (datetime.now() - timedelta(hours=2)).isoformat(),
                 'source': 'Business Insider'
-            },
-            {
-                'title': f'Analysts maintain buy rating for {symbol}',
-                'description': f'Market analysts recommend {symbol} as strong investment opportunity.',
-                'published_at': (datetime.now() - timedelta(days=1)).isoformat(),
-                'source': 'Bloomberg'
             }
         ]
         return pd.DataFrame(sample_news)
-    
-    def calculate_technical_indicators(self, df):
-        """Calculate technical indicators"""
-        try:
-            import talib
-            
-            # RSI
-            df['rsi'] = talib.RSI(df['Close'], timeperiod=14)
-            
-            # MACD
-            macd, macd_signal, macd_hist = talib.MACD(df['Close'])
-            df['macd'] = macd
-            df['macd_signal'] = macd_signal
-            df['macd_hist'] = macd_hist
-            
-            # Moving Averages
-            df['sma_20'] = talib.SMA(df['Close'], timeperiod=20)
-            df['sma_50'] = talib.SMA(df['Close'], timeperiod=50)
-            
-            # Bollinger Bands
-            bb_upper, bb_middle, bb_lower = talib.BBANDS(df['Close'], timeperiod=20)
-            df['bb_upper'] = bb_upper
-            df['bb_middle'] = bb_middle
-            df['bb_lower'] = bb_lower
-            
-            # Volume indicators
-            df['volume_sma'] = talib.SMA(df['Volume'], timeperiod=20)
-            
-        except Exception as e:
-            print(f"Error calculating technical indicators: {e}")
-        
-        return df
