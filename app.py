@@ -80,6 +80,13 @@ class FixedDataApp:
             border-radius: 4px;
             font-size: 0.8em;
         }
+        .price-alert {
+            background: #ff9800;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
         </style>
         """, unsafe_allow_html=True)
         
@@ -145,7 +152,7 @@ class FixedDataApp:
     def _show_data_validation_status(self):
         """Show data validation status"""
         st.sidebar.markdown("---")
-        st.sidebar.subheader("Data Status")
+        st.sidebar.subheader("📊 Data Status")
         
         if 'stock_data' in st.session_state and st.session_state.stock_data is not None:
             stock_data = st.session_state.stock_data
@@ -158,12 +165,12 @@ class FixedDataApp:
                 latest_date = stock_data.index.max()
                 if hasattr(latest_date, 'date'):
                     days_old = (datetime.now().date() - latest_date.date()).days
-                    if days_old == 0:
-                        st.sidebar.success("✅ Data is from today")
-                    elif days_old == 1:
-                        st.sidebar.info("ℹ️ Data is from yesterday")
-                    else:
-                        st.sidebar.warning(f"⚠️ Data is {days_old} days old")
+                    freshness_color = "🟢" if days_old == 0 else "🟡" if days_old <= 2 else "🔴"
+                    st.sidebar.write(f"**Freshness:** {freshness_color} {days_old} day(s) old")
+                    
+                # Data source info
+                if 'data_source' in st.session_state:
+                    st.sidebar.write(f"**Source:** {st.session_state.data_source}")
         else:
             st.sidebar.info("📊 No data loaded yet")
     
@@ -215,7 +222,8 @@ class FixedDataApp:
                 del st.session_state.stock_data
             
             # Fetch fresh data
-            stock_data = self.data_fetcher.get_stock_data(symbol, period)
+            with st.spinner("📡 Fetching market data..."):
+                stock_data = self.data_fetcher.get_stock_data(symbol, period)
             
             if stock_data is None or stock_data.empty:
                 st.error(f"❌ No data found for {symbol}")
@@ -223,7 +231,7 @@ class FixedDataApp:
                 return None
             
             # Enhanced data validation
-            validation_passed, validation_message = self._validate_stock_data(stock_data, symbol)
+            validation_passed, validation_message, data_source = self._validate_stock_data(stock_data, symbol)
             if not validation_passed:
                 st.error(f"❌ Data validation failed: {validation_message}")
                 return None
@@ -232,6 +240,7 @@ class FixedDataApp:
             st.session_state.stock_data = stock_data
             st.session_state.current_cache_key = cache_key
             st.session_state.current_symbol = symbol
+            st.session_state.data_source = data_source
             
             return stock_data
             
@@ -242,43 +251,48 @@ class FixedDataApp:
     def _validate_stock_data(self, stock_data, symbol):
         """Enhanced stock data validation"""
         if stock_data is None or stock_data.empty:
-            return False, "No data received"
+            return False, "No data received", "Unknown"
         
         # Check required columns
         required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
         missing_columns = [col for col in required_columns if col not in stock_data.columns]
         if missing_columns:
-            return False, f"Missing columns: {missing_columns}"
+            return False, f"Missing columns: {missing_columns}", "Unknown"
         
         # Check for reasonable price values
         latest_close = stock_data['Close'].iloc[-1]
         if latest_close <= 0:
-            return False, f"Invalid close price: ${latest_close:.2f}"
+            return False, f"Invalid close price: ${latest_close:.2f}", "Unknown"
         
         if latest_close > 10000:  # Unusually high price
-            return False, f"Suspiciously high price: ${latest_close:.2f}"
+            return False, f"Suspiciously high price: ${latest_close:.2f}", "Unknown"
         
         # Check for reasonable volume
         latest_volume = stock_data['Volume'].iloc[-1]
         if latest_volume <= 0:
-            return False, f"Invalid volume: {latest_volume}"
+            return False, f"Invalid volume: {latest_volume}", "Unknown"
         
         # Check data consistency
         if len(stock_data) > 1:
             price_change = abs(stock_data['Close'].iloc[-1] - stock_data['Close'].iloc[-2])
-            if price_change > stock_data['Close'].iloc[-2] * 0.5:  # More than 50% change
-                return False, f"Large price jump detected: {price_change:.2f}"
+            avg_price = (stock_data['Close'].iloc[-1] + stock_data['Close'].iloc[-2]) / 2
+            if price_change > avg_price * 0.5:  # More than 50% change
+                return False, f"Large price jump detected: ${price_change:.2f}", "Unknown"
         
-        return True, "Data validation passed"
+        # Determine data source based on characteristics
+        data_source = "Yahoo Finance" if len(stock_data) > 50 else "Alpha Vantage"
+        
+        return True, "Data validation passed", data_source
     
     def _show_data_verification(self, stock_data, symbol):
         """Show data verification information"""
         current_price = stock_data['Close'].iloc[-1]
         latest_date = stock_data.index.max()
+        data_source = st.session_state.get('data_source', 'Unknown')
         
         st.success(f"✅ **Data Verified for {symbol}**")
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Verified Price", f"${current_price:.2f}")
         with col2:
@@ -286,11 +300,14 @@ class FixedDataApp:
                 st.metric("Latest Data", latest_date.strftime("%Y-%m-%d"))
         with col3:
             st.metric("Data Points", len(stock_data))
+        with col4:
+            st.metric("Data Source", data_source)
     
     def _safe_fetch_news(self, symbol):
         """Safely fetch news data"""
         try:
-            return self.data_fetcher.get_news_data(symbol)
+            with st.spinner("📰 Fetching news..."):
+                return self.data_fetcher.get_news_data(symbol)
         except Exception as e:
             st.warning(f"⚠️ News fetching failed: {e}")
             return pd.DataFrame()
@@ -343,7 +360,8 @@ class FixedDataApp:
         with cols[3]:
             if 'rsi' in stock_data.columns and not pd.isna(stock_data['rsi'].iloc[-1]):
                 rsi = stock_data['rsi'].iloc[-1]
-                st.metric("RSI", f"{rsi:.1f}")
+                rsi_color = "red" if rsi > 70 else "green" if rsi < 30 else "orange"
+                st.metric("RSI", f"{rsi:.1f}", delta_color="off")
         
         with cols[4]:
             if len(stock_data) > 20 and 'sma_20' in stock_data.columns:
@@ -443,6 +461,8 @@ class FixedDataApp:
         feature_columns = ['Close', 'Volume']
         if 'rsi' in stock_data.columns:
             feature_columns.append('rsi')
+        if 'macd' in stock_data.columns:
+            feature_columns.append('macd')
         
         train_data = stock_data[feature_columns].dropna()
         
@@ -563,10 +583,10 @@ class FixedDataApp:
     
     def _force_data_refresh(self):
         """Force refresh of all data"""
-        if 'stock_data' in st.session_state:
-            del st.session_state.stock_data
-        if 'news_data' in st.session_state:
-            del st.session_state.news_data
+        keys_to_clear = ['stock_data', 'news_data', 'current_cache_key', 'data_source']
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
         st.success("✅ Data refresh triggered")
         st.rerun()
     
