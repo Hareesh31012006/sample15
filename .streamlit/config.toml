@@ -6,6 +6,3 @@ port = 8501
 [browser]
 serverAddress = "localhost"
 gatherUsageStats = false
-
-[scheduler]
-maxCachedMessageAge = 300
