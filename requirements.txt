@@ -10,6 +10,7 @@ torch==2.0.1
 plotly==5.14.1
 matplotlib==3.7.1
 seaborn==0.12.2
-ta-lib==0.4.26
+# REMOVE THIS: ta-lib==0.4.26
 scikit-learn==1.2.2
 python-dotenv==1.0.0
+ta  # Add this pure Python alternative
