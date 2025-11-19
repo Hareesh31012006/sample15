@@ -7,6 +7,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 import warnings
+import gc
 warnings.filterwarnings('ignore')
 
 class StockPredictor:
@@ -79,10 +80,11 @@ class StockPredictor:
             # Use Random Forest for better accuracy (falls back to Linear Regression)
             try:
                 self.model = RandomForestRegressor(
-                    n_estimators=50,  # Reduced for speed but better than linear
-                    max_depth=10,
+                    n_estimators=30,  # Further reduced for memory efficiency
+                    max_depth=8,      # Reduced depth
                     random_state=42,
-                    n_jobs=-1
+                    n_jobs=1,         # Single job to reduce memory usage
+                    verbose=0
                 )
                 self.model.fit(features, target)
                 
@@ -100,6 +102,26 @@ class StockPredictor:
             
         except Exception as e:
             print(f"Error training enhanced model: {e}")
+            return False
+    
+    def train_linear_regression(self, df, feature_columns=['Close', 'Volume']):
+        """Lightweight linear regression training"""
+        try:
+            # Use only basic features for memory efficiency
+            features = df[feature_columns].copy()
+            target = features['Close'].shift(-1).dropna()
+            features = features.iloc[:-1]
+            
+            if len(features) < 5:
+                return False
+            
+            self.model = LinearRegression()
+            self.model.fit(features, target)
+            self.is_trained = True
+            return True
+            
+        except Exception as e:
+            print(f"Error training linear model: {e}")
             return False
     
     def predict_next_day(self, df, feature_columns=['Close', 'Volume', 'rsi', 'macd']):
@@ -126,6 +148,31 @@ class StockPredictor:
             
         except Exception as e:
             print(f"Error making prediction: {e}")
+            return None, None, None
+    
+    def predict_next_day_simple(self, df, feature_columns=['Close', 'Volume']):
+        """Simple prediction for memory efficiency"""
+        if not self.is_trained or self.model is None:
+            return None, None, None
+        
+        try:
+            # Use basic features only
+            features = df[feature_columns].copy()
+            latest_features = features.iloc[-1:].values
+            
+            # Make prediction
+            prediction = self.model.predict(latest_features)[0]
+            
+            # Calculate current price
+            current_price = df['Close'].iloc[-1]
+            
+            # Basic confidence based on model type
+            confidence = 0.6 if isinstance(self.model, RandomForestRegressor) else 0.5
+            
+            return prediction, current_price, confidence
+            
+        except Exception as e:
+            print(f"Error making simple prediction: {e}")
             return None, None, None
     
     def calculate_enhanced_metrics(self, df, feature_columns):
@@ -171,10 +218,34 @@ class StockPredictor:
         except Exception as e:
             print(f"Error calculating enhanced metrics: {e}")
             return None
+    
+    def cleanup(self):
+        """Clean up model to free memory"""
+        try:
+            if self.model is not None:
+                # Clear model parameters
+                if hasattr(self.model, 'coef_'):
+                    del self.model.coef_
+                if hasattr(self.model, 'intercept_'):
+                    del self.model.intercept_
+                if hasattr(self.model, 'estimators_'):
+                    del self.model.estimators_
+                
+                del self.model
+                self.model = None
+            
+            self.is_trained = False
+            self.feature_importance = {}
+            
+            # Clear scikit-learn internal caches
+            gc.collect()
+            
+        except Exception as e:
+            print(f"Model cleanup error: {e}")
 
 class LSTMPredictor(nn.Module):
-    """LSTM Model for time series prediction"""
-    def __init__(self, input_size=4, hidden_size=50, num_layers=2, output_size=1):
+    """LSTM Model for time series prediction - Memory Optimized"""
+    def __init__(self, input_size=4, hidden_size=32, num_layers=1, output_size=1):  # Reduced sizes
         super(LSTMPredictor, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
@@ -189,3 +260,16 @@ class LSTMPredictor(nn.Module):
         out, _ = self.lstm(x, (h0, c0))
         out = self.fc(out[:, -1, :])
         return out
+    
+    def cleanup(self):
+        """Clean up LSTM model"""
+        try:
+            # Clear model parameters
+            for param in self.parameters():
+                if hasattr(param, 'data'):
+                    del param.data
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception as e:
+            print(f"LSTM cleanup error: {e}")
