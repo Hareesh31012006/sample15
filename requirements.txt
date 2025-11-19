@@ -6,7 +6,7 @@ alpha-vantage==2.3.1
 requests==2.31.0
 textblob==0.17.1
 transformers==4.30.0
-torch==2.0.1
+torch==2.0.1+cpu  # CPU-only version saves 500MB+
 plotly==5.14.1
 matplotlib==3.7.1
 seaborn==0.12.2
