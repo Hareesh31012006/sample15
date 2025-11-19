@@ -6,7 +6,7 @@ os.environ['TRANSFORMERS_OFFLINE'] = '0'
 warnings.filterwarnings("ignore")
 
 from textblob import TextBlob
-from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+from transformers import pipeline
 import torch
 import pandas as pd
 import numpy as np
@@ -41,16 +41,16 @@ class OptimizedSentimentAnalyzer:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
-            # Load with optimizations
+            # Load with optimizations - remove device parameter
             self.finbert_analyzer = pipeline(
                 "sentiment-analysis",
                 model="ProsusAI/finbert",
                 tokenizer="ProsusAI/finbert",
-                device=-1,  # Force CPU usage
-                torch_dtype=torch.float32,  # Use float32 instead of float16 for stability
-                batch_size=1,  # Process one at a time to save memory
+                # Remove device=-1 to let transformers auto-detect
+                torch_dtype=torch.float32,
+                batch_size=1,
                 truncation=True,
-                max_length=512
+                max_length=256  # Reduced for memory
             )
             self._is_model_loaded = True
             print("✓ FinBERT loaded successfully")
@@ -108,11 +108,11 @@ class OptimizedSentimentAnalyzer:
         sentiments_finbert = []
         
         # Limit the number of articles to process
-        max_articles = min(5, len(news_df))  # Process max 5 articles
+        max_articles = min(3, len(news_df))  # Process max 3 articles
         
         for _, article in news_df.head(max_articles).iterrows():
-            # Combine title and description for analysis
-            text = f"{article['title']}. {article.get('description', '')}"
+            # Use only title for analysis (reduces memory)
+            text = article['title']
             
             # TextBlob sentiment (always available)
             tb_sentiment = self.analyze_with_textblob(text)
@@ -124,10 +124,16 @@ class OptimizedSentimentAnalyzer:
         
         # Calculate average sentiments
         avg_textblob = np.mean(sentiments_textblob) if sentiments_textblob else 0.0
-        avg_finbert = np.mean(sentiments_finbert) if sentiments_finbert else 0.0
+        
+        # Only use FinBERT if we have valid results
+        valid_finbert_scores = [s for s in sentiments_finbert if s != 0.0]
+        avg_finbert = np.mean(valid_finbert_scores) if valid_finbert_scores else 0.0
         
         # Combined sentiment (weighted average)
-        combined_sentiment = (avg_textblob + avg_finbert * 2) / 3
+        if avg_finbert != 0.0:
+            combined_sentiment = (avg_textblob + avg_finbert * 2) / 3
+        else:
+            combined_sentiment = avg_textblob
         
         # Clear memory after processing
         gc.collect()
