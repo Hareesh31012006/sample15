@@ -1,0 +1,16 @@
+streamlit==1.28.0
+pandas==2.0.3
+numpy==1.24.3
+yfinance==0.2.18
+alpha-vantage==2.3.1
+newsapi-python==0.2.7
+textblob==0.17.1
+transformers==4.30.0
+torch==2.0.1
+plotly==5.14.1
+matplotlib==3.7.1
+seaborn==0.12.2
+ta-lib==0.4.26
+scikit-learn==1.2.2
+tweepy==4.14.0
+python-dotenv==1.0.0
