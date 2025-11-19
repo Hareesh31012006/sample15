@@ -96,6 +96,10 @@ class MemoryOptimizedStockApp:
             if hasattr(self, 'sentiment_analyzer') and self.sentiment_analyzer:
                 self.sentiment_analyzer.cleanup()
             
+            # Clean up stock predictor
+            if hasattr(self, 'stock_predictor') and self.stock_predictor:
+                self.stock_predictor.cleanup()
+            
             # Clear session state data except essential variables
             essential_keys = ['current_symbol', 'period', 'use_technical_indicators', 
                             'use_sentiment_analysis', 'use_advanced_model', 'analysis_count']
@@ -124,27 +128,32 @@ class MemoryOptimizedStockApp:
         st.session_state.analysis_count += 1
         self.analysis_count = st.session_state.analysis_count
         
-        # Auto-cleanup every 2 analyses to prevent memory buildup
-        if st.session_state.analysis_count >= 2:
-            st.session_state.analysis_count = 0
+        # Auto-cleanup every analysis to prevent memory buildup
+        if st.session_state.analysis_count >= 1:  # Clean after every analysis
             self._gentle_memory_cleanup()
         
         # Always check memory health
-        self._check_memory_health()
+        memory_issue = self._check_memory_health()
+        return memory_issue
     
     def _gentle_memory_cleanup(self):
         """Gentle cleanup between analyses"""
         try:
             # Clean up sentiment analyzer but keep model loaded
             if hasattr(self, 'sentiment_analyzer') and self.sentiment_analyzer:
-                # Only clear the heavy processing, keep the model
                 self.sentiment_analyzer.cleanup()
+            
+            # Clean up stock predictor
+            if hasattr(self, 'stock_predictor') and self.stock_predictor:
+                self.stock_predictor.cleanup()
             
             # Clear large data objects
             if 'stock_data' in st.session_state:
                 del st.session_state.stock_data
             if 'news_data' in st.session_state:
                 del st.session_state.news_data
+            if 'article_sentiments' in st.session_state:
+                del st.session_state.article_sentiments
             
             gc.collect()
             
@@ -171,6 +180,13 @@ class MemoryOptimizedStockApp:
             border-radius: 20px;
             font-size: 0.9em;
             font-weight: bold;
+        }
+        .news-article {
+            background: #f8f9fa;
+            padding: 1rem;
+            margin: 0.5rem 0;
+            border-radius: 8px;
+            border-left: 4px solid #1f77b4;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -230,13 +246,15 @@ class MemoryOptimizedStockApp:
         
         # Analysis counter
         if 'analysis_count' in st.session_state:
-            st.sidebar.write(f"📊 Analyses: {st.session_state.analysis_count}/2")
+            st.sidebar.write(f"📊 Analyses: {st.session_state.analysis_count}")
     
     def analyze_stock(self, symbol):
         """Perform memory-optimized stock analysis"""
         try:
             # Apply smart memory management
-            self._smart_analysis_management()
+            memory_issue = self._smart_analysis_management()
+            if memory_issue:
+                st.info("🔄 Memory optimized for better performance")
             
             # Fetch data
             stock_data = self._fetch_stock_data(symbol, st.session_state.period)
@@ -256,8 +274,9 @@ class MemoryOptimizedStockApp:
                 self._display_technical_analysis(stock_data)
             
             sentiment_score = 0.0
-            if st.session_state.use_sentiment_analysis:
-                sentiment_score = self._display_sentiment_analysis(news_data)
+            article_sentiments = []
+            if st.session_state.use_sentiment_analysis and not news_data.empty:
+                sentiment_score, article_sentiments = self._display_sentiment_analysis(news_data, symbol)
             
             self._display_ai_prediction(stock_data, sentiment_score, symbol)
             
@@ -313,9 +332,11 @@ class MemoryOptimizedStockApp:
             st.metric("Volume", f"{volume:,.0f}")
         
         with col4:
-            if 'rsi' in stock_data.columns:
+            if 'rsi' in stock_data.columns and not pd.isna(stock_data['rsi'].iloc[-1]):
                 rsi = stock_data['rsi'].iloc[-1]
-                st.metric("RSI", f"{rsi:.1f}")
+                rsi_color = "🟢" if rsi < 30 else "🔴" if rsi > 70 else "🟡"
+                st.metric("RSI", f"{rsi:.1f}", delta=None, delta_color="off")
+                st.write(f"{rsi_color} {'Oversold' if rsi < 30 else 'Overbought' if rsi > 70 else 'Neutral'}")
     
     def _display_price_chart(self, stock_data, symbol):
         """Display price chart"""
@@ -335,13 +356,13 @@ class MemoryOptimizedStockApp:
         except Exception as e:
             st.warning(f"⚠️ Technical analysis error: {e}")
     
-    def _display_sentiment_analysis(self, news_data):
-        """Display sentiment analysis"""
+    def _display_sentiment_analysis(self, news_data, symbol):
+        """Display sentiment analysis with news articles"""
         st.subheader("😊 Sentiment Analysis")
         
         try:
             with st.spinner("Analyzing sentiment..."):
-                sentiment_score = self.sentiment_analyzer.analyze_news_sentiment(news_data)
+                sentiment_score, article_sentiments = self.sentiment_analyzer.analyze_news_sentiment_detailed(news_data)
             
             # Display sentiment gauge
             sentiment_chart = self.visualizer.plot_sentiment_analysis(sentiment_score, news_data)
@@ -350,11 +371,45 @@ class MemoryOptimizedStockApp:
             # Interpret sentiment
             self._interpret_sentiment(sentiment_score)
             
-            return sentiment_score
+            # Display analyzed news articles
+            self._display_news_articles(article_sentiments, symbol)
+            
+            return sentiment_score, article_sentiments
             
         except Exception as e:
             st.warning(f"⚠️ Sentiment analysis error: {e}")
-            return 0.0
+            return 0.0, []
+    
+    def _display_news_articles(self, article_sentiments, symbol):
+        """Display analyzed news articles"""
+        if not article_sentiments:
+            st.info("No news articles available for analysis.")
+            return
+        
+        st.subheader(f"📰 Recent News for {symbol}")
+        
+        for i, article in enumerate(article_sentiments):
+            with st.container():
+                st.markdown(f"""
+                <div class="news-article">
+                    <h4>📖 {article['title']}</h4>
+                    <p><strong>Source:</strong> {article.get('source', 'Unknown')} | 
+                    <strong>Published:</strong> {article.get('published_at', 'Unknown')}</p>
+                    <p>{article.get('description', 'No description available.')}</p>
+                    <div style="display: flex; gap: 1rem; margin-top: 0.5rem;">
+                        <span style="background: {'#4CAF50' if article['sentiment'] > 0.1 else '#FF9800' if article['sentiment'] < -0.1 else '#9E9E9E'}; 
+                        color: white; padding: 0.2rem 0.5rem; border-radius: 4px;">
+                            Sentiment: {article['sentiment']:.3f}
+                        </span>
+                        <span style="background: #2196F3; color: white; padding: 0.2rem 0.5rem; border-radius: 4px;">
+                            {article['label']}
+                        </span>
+                        <span style="background: #673AB7; color: white; padding: 0.2rem 0.5rem; border-radius: 4px;">
+                            Confidence: {article['confidence']:.1%}
+                        </span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
     
     def _interpret_sentiment(self, sentiment_score):
         """Interpret sentiment score"""
@@ -369,7 +424,7 @@ class MemoryOptimizedStockApp:
         else:
             interpretation, color = "Strongly Bearish 🔻", "#F44336"
         
-        st.info(f"**Market Sentiment:** {interpretation} (Score: {sentiment_score:.3f})")
+        st.info(f"**Overall Market Sentiment:** {interpretation} (Score: {sentiment_score:.3f})")
     
     def _display_ai_prediction(self, stock_data, sentiment_score, symbol):
         """Display AI prediction"""
@@ -424,14 +479,15 @@ class MemoryOptimizedStockApp:
             
             if len(train_data) > 5:
                 try:
+                    # Use simple linear regression for memory efficiency
                     success = self.stock_predictor.train_linear_regression(train_data, feature_columns)
                     
                     if success:
-                        predicted_price, current_price = self.stock_predictor.predict_next_day(train_data, feature_columns)
+                        predicted_price, current_price, confidence = self.stock_predictor.predict_next_day_simple(train_data, feature_columns)
                         
                         if predicted_price is not None:
                             self._display_prediction_results(
-                                predicted_price, current_price, sentiment_score, None, False
+                                predicted_price, current_price, sentiment_score, confidence, False
                             )
                         else:
                             st.error("❌ Prediction generation failed")
