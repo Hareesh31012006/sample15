@@ -424,31 +424,83 @@ class MemoryOptimizedNextTickApp:
         """Display enhanced prediction results with confidence"""
         price_change_pred = ((predicted_price - current_price) / current_price) * 100
         
-        # Enhanced recommendation algorithm
-        sentiment_weight = 0.3
-        price_weight = 0.7
+        # Enhanced recommendation algorithm with improved logic
+        sentiment_weight = 0.4  # Increased sentiment weight
+        price_weight = 0.6     # Reduced price weight
         
-        # Combined score
-        combined_score = (price_change_pred * price_weight) + (sentiment_score * 100 * sentiment_weight)
+        # Combined score - improved calculation
+        price_component = price_change_pred * price_weight
+        sentiment_component = sentiment_score * 50 * sentiment_weight  # Scale sentiment appropriately
         
-        # Dynamic thresholds based on confidence
-        confidence_factor = confidence or 0.5
-        buy_threshold = 1.0 * confidence_factor
-        sell_threshold = -1.0 * confidence_factor
+        combined_score = price_component + sentiment_component
         
-        # Determine recommendation
-        if combined_score > buy_threshold and sentiment_score > 0.05:
-            recommendation = "STRONG BUY" if combined_score > 3.0 else "BUY"
-            recommendation_color = "green"
-            recommendation_emoji = "🚀" if combined_score > 3.0 else "📈"
-        elif combined_score < sell_threshold or sentiment_score < -0.1:
-            recommendation = "STRONG SELL" if combined_score < -3.0 else "SELL" 
-            recommendation_color = "red"
-            recommendation_emoji = "🔻" if combined_score < -3.0 else "📉"
+        # Enhanced recommendation logic
+        if price_change_pred > 0 and sentiment_score > 0:
+            # Bullish scenario: price up + positive sentiment
+            if price_change_pred > 2.0 and sentiment_score > 0.2:
+                recommendation = "STRONG BUY"
+                recommendation_color = "green"
+                recommendation_emoji = "🚀"
+            elif price_change_pred > 0.5 and sentiment_score > 0.05:
+                recommendation = "BUY"
+                recommendation_color = "lightgreen"
+                recommendation_emoji = "📈"
+            else:
+                recommendation = "HOLD"
+                recommendation_color = "orange"
+                recommendation_emoji = "⚖️"
+                
+        elif price_change_pred < 0 and sentiment_score < 0:
+            # Bearish scenario: price down + negative sentiment
+            if price_change_pred < -2.0 and sentiment_score < -0.2:
+                recommendation = "STRONG SELL"
+                recommendation_color = "red"
+                recommendation_emoji = "🔻"
+            elif price_change_pred < -0.5 and sentiment_score < -0.05:
+                recommendation = "SELL"
+                recommendation_color = "red"
+                recommendation_emoji = "📉"
+            else:
+                recommendation = "HOLD"
+                recommendation_color = "orange"
+                recommendation_emoji = "⚖️"
+                
         else:
-            recommendation = "HOLD"
-            recommendation_color = "orange"
-            recommendation_emoji = "⚖️"
+            # Mixed signals: price and sentiment going opposite directions
+            if abs(price_change_pred) > abs(sentiment_score * 100):
+                # Price trend dominates
+                if price_change_pred > 1.0:
+                    recommendation = "CAUTIOUS BUY"
+                    recommendation_color = "lightgreen"
+                    recommendation_emoji = "📈"
+                elif price_change_pred < -1.0:
+                    recommendation = "CAUTIOUS SELL"
+                    recommendation_color = "orange"
+                    recommendation_emoji = "📉"
+                else:
+                    recommendation = "HOLD"
+                    recommendation_color = "orange"
+                    recommendation_emoji = "⚖️"
+            else:
+                # Sentiment dominates
+                if sentiment_score > 0.1:
+                    recommendation = "SENTIMENT BUY"
+                    recommendation_color = "lightgreen"
+                    recommendation_emoji = "😊"
+                elif sentiment_score < -0.1:
+                    recommendation = "SENTIMENT SELL"
+                    recommendation_color = "orange"
+                    recommendation_emoji = "😞"
+                else:
+                    recommendation = "HOLD"
+                    recommendation_color = "orange"
+                    recommendation_emoji = "⚖️"
+        
+        # Override if confidence is very low
+        if confidence and confidence < 0.3:
+            recommendation = "HOLD (LOW CONFIDENCE)"
+            recommendation_color = "gray"
+            recommendation_emoji = "🤔"
         
         # Display enhanced results
         st.subheader("🎯 Prediction Results")
@@ -462,42 +514,97 @@ class MemoryOptimizedNextTickApp:
             st.metric("Predicted Price", f"${predicted_price:.2f}", f"{price_change_pred:+.2f}%")
         
         with col3:
-            st.metric("Sentiment Score", f"{sentiment_score:.3f}")
+            # Color code sentiment
+            sentiment_color = "red" if sentiment_score < -0.1 else "green" if sentiment_score > 0.1 else "orange"
+            st.metric("Sentiment Score", f"{sentiment_score:.3f}", delta_color="off")
         
         with col4:
             confidence_display = confidence * 100 if confidence else "N/A"
             if confidence:
-                st.metric("Model Confidence", f"{confidence_display:.1f}%")
+                confidence_color = "green" if confidence > 0.7 else "orange" if confidence > 0.5 else "red"
+                st.metric("Model Confidence", f"{confidence_display:.1f}%", delta_color="off")
             else:
                 st.metric("Model Confidence", "N/A")
         
-        # Enhanced recommendation with reasoning
+        # Enhanced recommendation with detailed reasoning
+        reasoning = []
+        
+        if price_change_pred > 0:
+            reasoning.append(f"price expected to rise (+{price_change_pred:.2f}%)")
+        elif price_change_pred < 0:
+            reasoning.append(f"price expected to fall ({price_change_pred:+.2f}%)")
+        else:
+            reasoning.append("price expected to remain stable")
+        
+        if sentiment_score > 0.1:
+            reasoning.append("positive market sentiment")
+        elif sentiment_score < -0.1:
+            reasoning.append("negative market sentiment")
+        else:
+            reasoning.append("neutral market sentiment")
+        
+        if confidence:
+            if confidence > 0.7:
+                reasoning.append("high model confidence")
+            elif confidence > 0.5:
+                reasoning.append("moderate model confidence")
+            else:
+                reasoning.append("low model confidence")
+        
+        reasoning_text = ", ".join(reasoning)
+        
         st.markdown(f"""
         <div style='background-color: #f8f9fa; padding: 1.5rem; border-radius: 10px; border-left: 5px solid {recommendation_color}; margin: 1rem 0;'>
             <h3 style='color: {recommendation_color}; margin: 0;'>{recommendation_emoji} Recommendation: {recommendation}</h3>
             <p style='margin: 0.5rem 0 0 0; color: #666;'>
-                Based on analysis of: 
-                <strong>Price trend</strong> ({price_change_pred:+.2f}%), 
-                <strong>Market sentiment</strong> ({sentiment_score:.3f})
-                {f', <strong>Model confidence</strong> ({confidence_display:.1f}%)' if confidence else ''}
+                Based on analysis of: {reasoning_text}
+            </p>
+            <p style='margin: 0.5rem 0 0 0; font-size: 0.9rem; color: #888;'>
+                Combined Score: {combined_score:.2f} | Price Impact: {price_change_pred:+.2f}% | Sentiment Impact: {sentiment_score:.3f}
             </p>
         </div>
         """, unsafe_allow_html=True)
+        
+        # Add explanation for conflicting signals
+        if (price_change_pred > 0 and sentiment_score < -0.1) or (price_change_pred < 0 and sentiment_score > 0.1):
+            st.info("""
+            **Note:** Mixed signals detected. The price prediction and market sentiment are pointing in different directions. 
+            Consider waiting for clearer market conditions or conducting additional research.
+            """)
     
     def _display_prediction_results(self, predicted_price, current_price, sentiment_score):
         """Display basic prediction results"""
         price_change_pred = ((predicted_price - current_price) / current_price) * 100
         
-        # Basic recommendation algorithm
+        # Improved basic recommendation algorithm
         if price_change_pred > 1.0 and sentiment_score > 0.1:
             recommendation = "BUY"
             recommendation_color = "green"
-        elif price_change_pred < -1.0 or sentiment_score < -0.1:
+            recommendation_emoji = "📈"
+        elif price_change_pred < -1.0 and sentiment_score < -0.1:
             recommendation = "SELL"
             recommendation_color = "red"
+            recommendation_emoji = "📉"
+        elif price_change_pred > 2.0:
+            recommendation = "BUY (Strong Price Momentum)"
+            recommendation_color = "green"
+            recommendation_emoji = "🚀"
+        elif price_change_pred < -2.0:
+            recommendation = "SELL (Strong Price Decline)"
+            recommendation_color = "red"
+            recommendation_emoji = "🔻"
+        elif sentiment_score > 0.2:
+            recommendation = "BUY (Positive Sentiment)"
+            recommendation_color = "lightgreen"
+            recommendation_emoji = "😊"
+        elif sentiment_score < -0.2:
+            recommendation = "SELL (Negative Sentiment)"
+            recommendation_color = "orange"
+            recommendation_emoji = "😞"
         else:
             recommendation = "HOLD"
             recommendation_color = "orange"
+            recommendation_emoji = "⚖️"
         
         # Display results
         col1, col2, col3 = st.columns(3)
@@ -514,8 +621,8 @@ class MemoryOptimizedNextTickApp:
         # Basic recommendation
         st.markdown(f"""
         <div style='background-color: #f0f2f6; padding: 1.5rem; border-radius: 10px; border-left: 5px solid {recommendation_color}; margin: 1rem 0;'>
-            <h3 style='color: {recommendation_color}; margin: 0;'>Recommendation: {recommendation}</h3>
-            <p style='margin: 0.5rem 0 0 0;'>Based on AI prediction and market sentiment</p>
+            <h3 style='color: {recommendation_color}; margin: 0;'>{recommendation_emoji} Recommendation: {recommendation}</h3>
+            <p style='margin: 0.5rem 0 0 0;'>Based on AI prediction and market sentiment analysis</p>
         </div>
         """, unsafe_allow_html=True)
     
