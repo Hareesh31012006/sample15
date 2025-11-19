@@ -389,27 +389,50 @@ class MemoryOptimizedStockApp:
         st.subheader(f"📰 Recent News for {symbol}")
         
         for i, article in enumerate(article_sentiments):
+            # Create a clean, well-formatted news card for each article
             with st.container():
-                st.markdown(f"""
-                <div class="news-article">
-                    <h4>📖 {article['title']}</h4>
-                    <p><strong>Source:</strong> {article.get('source', 'Unknown')} | 
-                    <strong>Published:</strong> {article.get('published_at', 'Unknown')}</p>
-                    <p>{article.get('description', 'No description available.')}</p>
-                    <div style="display: flex; gap: 1rem; margin-top: 0.5rem;">
-                        <span style="background: {'#4CAF50' if article['sentiment'] > 0.1 else '#FF9800' if article['sentiment'] < -0.1 else '#9E9E9E'}; 
-                        color: white; padding: 0.2rem 0.5rem; border-radius: 4px;">
-                            Sentiment: {article['sentiment']:.3f}
-                        </span>
-                        <span style="background: #2196F3; color: white; padding: 0.2rem 0.5rem; border-radius: 4px;">
-                            {article['label']}
-                        </span>
-                        <span style="background: #673AB7; color: white; padding: 0.2rem 0.5rem; border-radius: 4px;">
-                            Confidence: {article['confidence']:.1%}
-                        </span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    st.markdown(f"**{article['title']}**")
+                    if article.get('description') and article['description'] != 'No description available.':
+                        st.markdown(f"*{article['description']}*")
+                    
+                    # Source and date
+                    source = article.get('source', 'Unknown Source')
+                    published = article.get('published_at', 'Unknown date')
+                    st.caption(f"📰 {source} | 📅 {published}")
+                
+                with col2:
+                    # Sentiment indicators
+                    sentiment = article['sentiment']
+                    confidence = article['confidence']
+                    label = article['label']
+                    
+                    # Color coding based on sentiment
+                    if label == "positive":
+                        sentiment_color = "#4CAF50"
+                        sentiment_emoji = "😊"
+                    elif label == "negative":
+                        sentiment_color = "#F44336" 
+                        sentiment_emoji = "😞"
+                    else:
+                        sentiment_color = "#9E9E9E"
+                        sentiment_emoji = "😐"
+                    
+                    # Display sentiment metrics
+                    st.metric(
+                        label="Sentiment Score", 
+                        value=f"{sentiment:.3f}",
+                        delta=f"{label.capitalize()} {sentiment_emoji}"
+                    )
+                    
+                    # Confidence indicator
+                    st.progress(confidence, text=f"Confidence: {confidence:.1%}")
+            
+            # Add separator between articles (except for the last one)
+            if i < len(article_sentiments) - 1:
+                st.markdown("---")
     
     def _interpret_sentiment(self, sentiment_score):
         """Interpret sentiment score"""
