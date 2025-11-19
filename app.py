@@ -106,7 +106,7 @@ class NextTickApp:
         if 'stock_data' not in st.session_state or st.session_state.get('current_symbol') != symbol:
             with st.spinner(f"Fetching data for {symbol}..."):
                 # Fetch stock data
-                stock_data = self.data_fetcher.get_stock_data_yahoo(symbol, period)
+                stock_data = self.data_fetcher.get_stock_data(symbol, period)
                 
                 if stock_data is None or stock_data.empty:
                     st.error(f"Could not fetch data for {symbol}. Please check the symbol and try again.")
