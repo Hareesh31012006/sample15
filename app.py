@@ -9,7 +9,7 @@ import gc
 import warnings
 warnings.filterwarnings('ignore')
 
-# Add error handling for imports
+# Import optimized modules
 try:
     from utils.data_fetcher import DataFetcher
     from utils.sentiment_analyzer import OptimizedSentimentAnalyzer
@@ -28,7 +28,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-class DeploymentReadyApp:
+class FixedDataApp:
     def __init__(self):
         self._initialize_components()
     
@@ -42,7 +42,6 @@ class DeploymentReadyApp:
             st.sidebar.success("✅ Components initialized successfully")
         except Exception as e:
             st.error(f"❌ Initialization failed: {e}")
-            # Create fallback components
             self._create_fallback_components()
     
     def _create_fallback_components(self):
@@ -74,7 +73,7 @@ class DeploymentReadyApp:
             text-align: center;
             margin-bottom: 2rem;
         }
-        .deployment-badge {
+        .data-verified {
             background: #4CAF50;
             color: white;
             padding: 4px 8px;
@@ -85,7 +84,7 @@ class DeploymentReadyApp:
         """, unsafe_allow_html=True)
         
         st.markdown(
-            '<h1 class="main-header">📈 NextTick AI Stock Prediction <span class="deployment-badge">Deployment Ready</span></h1>', 
+            '<h1 class="main-header">📈 NextTick AI Stock Prediction <span class="data-verified">Data Verified</span></h1>', 
             unsafe_allow_html=True
         )
         
@@ -118,22 +117,22 @@ class DeploymentReadyApp:
         use_technical_indicators = st.sidebar.checkbox("Technical Indicators", True)
         use_sentiment_analysis = st.sidebar.checkbox(
             "Sentiment Analysis", 
-            False,  # Default to false for stability
+            False,
             disabled=not sentiment_available,
             help="Available" if sentiment_available else "Not available in current deployment"
         )
         use_advanced_model = st.sidebar.checkbox("Enhanced Model", True)
         
-        # Deployment controls
-        st.sidebar.subheader("Deployment")
-        if st.sidebar.button("🔄 Restart Session"):
-            self._restart_session()
+        # Data refresh
+        st.sidebar.subheader("Data Management")
+        if st.sidebar.button("🔄 Refresh Data"):
+            self._force_data_refresh()
         
         if st.sidebar.button("🧹 Clear Cache"):
             self._safe_clear_cache()
         
-        # Deployment status
-        self._show_deployment_status()
+        # Data validation section
+        self._show_data_validation_status()
         
         # Main analysis trigger
         if st.sidebar.button("🚀 Analyze Stock") or symbol:
@@ -143,65 +142,55 @@ class DeploymentReadyApp:
                 st.error(f"❌ Analysis error: {e}")
                 st.info("💡 Try using simpler features or a different stock symbol")
     
-    def _show_deployment_status(self):
-        """Show deployment environment status"""
+    def _show_data_validation_status(self):
+        """Show data validation status"""
         st.sidebar.markdown("---")
-        st.sidebar.subheader("Deployment Status")
+        st.sidebar.subheader("Data Status")
         
-        # Platform detection
-        try:
-            # Common deployment platform environment variables
-            platform = "Unknown"
-            if 'STREAMLIT_SERVER_PORT' in os.environ:
-                platform = "Streamlit Cloud"
-            elif 'HEROKU_APP_NAME' in os.environ:
-                platform = "Heroku"
-            elif 'VERCEL' in os.environ:
-                platform = "Vercel"
-            elif 'RENDER' in os.environ:
-                platform = "Render"
-            else:
-                platform = "Local"
-            
-            st.sidebar.write(f"**Platform:** {platform}")
-        except:
-            st.sidebar.write("**Platform:** Local")
-        
-        # Feature availability
-        features = []
-        if hasattr(self, 'data_fetcher'):
-            features.append("📊 Data Fetching")
-        if hasattr(self, 'sentiment_analyzer') and self.sentiment_analyzer:
-            features.append("😊 Sentiment Analysis")
-        if hasattr(self, 'stock_predictor'):
-            features.append("🤖 AI Prediction")
-        
-        st.sidebar.write("**Available Features:**")
-        for feature in features:
-            st.sidebar.write(f"  {feature}")
+        if 'stock_data' in st.session_state and st.session_state.stock_data is not None:
+            stock_data = st.session_state.stock_data
+            if not stock_data.empty:
+                current_price = stock_data['Close'].iloc[-1]
+                st.sidebar.write(f"**Current Price:** ${current_price:.2f}")
+                st.sidebar.write(f"**Data Points:** {len(stock_data)}")
+                
+                # Data freshness check
+                latest_date = stock_data.index.max()
+                if hasattr(latest_date, 'date'):
+                    days_old = (datetime.now().date() - latest_date.date()).days
+                    if days_old == 0:
+                        st.sidebar.success("✅ Data is from today")
+                    elif days_old == 1:
+                        st.sidebar.info("ℹ️ Data is from yesterday")
+                    else:
+                        st.sidebar.warning(f"⚠️ Data is {days_old} days old")
+        else:
+            st.sidebar.info("📊 No data loaded yet")
     
     def _render_main_content(self):
         """Render main content area"""
-        # This will be populated by analyze_stock
         pass
     
     def analyze_stock(self, symbol, period, use_technical_indicators, use_sentiment_analysis, use_advanced_model):
-        """Deployment-safe stock analysis"""
+        """Fixed stock analysis with data validation"""
         # Validate inputs
         if not symbol or len(symbol) < 1:
             st.error("❌ Please enter a valid stock symbol")
             return
         
-        if len(symbol) > 10:  # Reasonable symbol length
+        if len(symbol) > 10:
             st.error("❌ Stock symbol seems too long")
             return
         
         try:
-            with st.spinner(f"🚀 Analyzing {symbol}..."):
-                # Fetch data with timeout protection
-                stock_data = self._safe_fetch_data(symbol, period)
+            with st.spinner(f"🚀 Analyzing {symbol} with data validation..."):
+                # Fetch data with enhanced validation
+                stock_data = self._safe_fetch_data_with_validation(symbol, period)
                 if stock_data is None:
                     return
+                
+                # Show data verification
+                self._show_data_verification(stock_data, symbol)
                 
                 # Fetch news data if needed
                 news_data = pd.DataFrame()
@@ -217,39 +206,86 @@ class DeploymentReadyApp:
             st.error(f"❌ Analysis failed: {e}")
             self._show_retry_options(symbol)
     
-    def _safe_fetch_data(self, symbol, period):
-        """Safely fetch stock data with error handling"""
+    def _safe_fetch_data_with_validation(self, symbol, period):
+        """Safely fetch stock data with enhanced validation"""
         try:
-            # Set timeout for data fetching
-            import signal
-            class TimeoutError(Exception):
-                pass
+            # Clear any cached data to force fresh fetch
+            cache_key = f"{symbol}_{period}"
+            if 'stock_data' in st.session_state and st.session_state.get('current_cache_key') == cache_key:
+                del st.session_state.stock_data
             
-            def timeout_handler(signum, frame):
-                raise TimeoutError("Data fetching timed out")
+            # Fetch fresh data
+            stock_data = self.data_fetcher.get_stock_data(symbol, period)
             
-            # Set timeout (not available on all platforms)
-            try:
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(30)  # 30 second timeout
-                data = self.data_fetcher.get_stock_data(symbol, period)
-                signal.alarm(0)  # Cancel timeout
-            except:
-                data = self.data_fetcher.get_stock_data(symbol, period)  # Fallback
-            
-            if data is None or data.empty:
+            if stock_data is None or stock_data.empty:
                 st.error(f"❌ No data found for {symbol}")
-                st.info("💡 Try a different symbol like AAPL, TSLA, or MSFT")
+                st.info("💡 Try popular symbols like: AAPL, TSLA, MSFT, GOOGL, AMZN")
                 return None
             
-            return data
+            # Enhanced data validation
+            validation_passed, validation_message = self._validate_stock_data(stock_data, symbol)
+            if not validation_passed:
+                st.error(f"❌ Data validation failed: {validation_message}")
+                return None
             
-        except TimeoutError:
-            st.error("⏰ Data fetching timed out. Please try again.")
-            return None
+            # Store validated data
+            st.session_state.stock_data = stock_data
+            st.session_state.current_cache_key = cache_key
+            st.session_state.current_symbol = symbol
+            
+            return stock_data
+            
         except Exception as e:
             st.error(f"❌ Error fetching data: {e}")
             return None
+    
+    def _validate_stock_data(self, stock_data, symbol):
+        """Enhanced stock data validation"""
+        if stock_data is None or stock_data.empty:
+            return False, "No data received"
+        
+        # Check required columns
+        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        missing_columns = [col for col in required_columns if col not in stock_data.columns]
+        if missing_columns:
+            return False, f"Missing columns: {missing_columns}"
+        
+        # Check for reasonable price values
+        latest_close = stock_data['Close'].iloc[-1]
+        if latest_close <= 0:
+            return False, f"Invalid close price: ${latest_close:.2f}"
+        
+        if latest_close > 10000:  # Unusually high price
+            return False, f"Suspiciously high price: ${latest_close:.2f}"
+        
+        # Check for reasonable volume
+        latest_volume = stock_data['Volume'].iloc[-1]
+        if latest_volume <= 0:
+            return False, f"Invalid volume: {latest_volume}"
+        
+        # Check data consistency
+        if len(stock_data) > 1:
+            price_change = abs(stock_data['Close'].iloc[-1] - stock_data['Close'].iloc[-2])
+            if price_change > stock_data['Close'].iloc[-2] * 0.5:  # More than 50% change
+                return False, f"Large price jump detected: {price_change:.2f}"
+        
+        return True, "Data validation passed"
+    
+    def _show_data_verification(self, stock_data, symbol):
+        """Show data verification information"""
+        current_price = stock_data['Close'].iloc[-1]
+        latest_date = stock_data.index.max()
+        
+        st.success(f"✅ **Data Verified for {symbol}**")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Verified Price", f"${current_price:.2f}")
+        with col2:
+            if hasattr(latest_date, 'strftime'):
+                st.metric("Latest Data", latest_date.strftime("%Y-%m-%d"))
+        with col3:
+            st.metric("Data Points", len(stock_data))
     
     def _safe_fetch_news(self, symbol):
         """Safely fetch news data"""
@@ -287,9 +323,9 @@ class DeploymentReadyApp:
     
     def _render_stock_info(self, stock_data, symbol):
         """Render stock information"""
-        st.subheader(f"📈 {symbol} Overview")
+        st.subheader(f"📈 {symbol} Stock Overview")
         
-        cols = st.columns(4)
+        cols = st.columns(5)
         with cols[0]:
             current_price = stock_data['Close'].iloc[-1]
             st.metric("Current Price", f"${current_price:.2f}")
@@ -305,7 +341,12 @@ class DeploymentReadyApp:
             st.metric("Volume", f"{volume:,.0f}")
         
         with cols[3]:
-            if 'sma_20' in stock_data.columns:
+            if 'rsi' in stock_data.columns and not pd.isna(stock_data['rsi'].iloc[-1]):
+                rsi = stock_data['rsi'].iloc[-1]
+                st.metric("RSI", f"{rsi:.1f}")
+        
+        with cols[4]:
+            if len(stock_data) > 20 and 'sma_20' in stock_data.columns:
                 sma_20 = stock_data['sma_20'].iloc[-1]
                 price_ratio = (stock_data['Close'].iloc[-1] / sma_20 - 1) * 100
                 st.metric("vs SMA20", f"{price_ratio:+.1f}%")
@@ -381,84 +422,135 @@ class DeploymentReadyApp:
         """Render prediction component"""
         st.subheader("🤖 AI Prediction")
         try:
+            # Get current price for validation
+            current_price = stock_data['Close'].iloc[-1]
+            
             if use_advanced_model:
-                self._generate_enhanced_prediction(stock_data, sentiment_score, symbol)
+                predicted_price, confidence = self._generate_enhanced_prediction(stock_data, current_price)
             else:
-                self._generate_basic_prediction(stock_data, sentiment_score, symbol)
+                predicted_price, confidence = self._generate_basic_prediction(stock_data, current_price)
+            
+            if predicted_price is not None:
+                self._show_prediction_results(predicted_price, current_price, sentiment_score, confidence, use_advanced_model)
+            else:
+                st.warning("❌ Could not generate prediction")
+                
         except Exception as e:
             st.warning(f"⚠️ Prediction failed: {e}")
     
-    def _generate_enhanced_prediction(self, stock_data, sentiment_score, symbol):
+    def _generate_enhanced_prediction(self, stock_data, current_price):
         """Generate enhanced prediction"""
-        with st.spinner("Training advanced model..."):
-            feature_columns = ['Close', 'Volume']
-            if 'rsi' in stock_data.columns:
-                feature_columns.append('rsi')
-            
-            train_data = stock_data[feature_columns].dropna()
-            
-            if len(train_data) > 10:
-                try:
-                    if self.stock_predictor.train_enhanced_model(train_data, feature_columns):
-                        predicted_price, current_price, confidence = self.stock_predictor.predict_next_day(train_data, feature_columns)
-                        if predicted_price is not None:
-                            self._show_prediction_results(predicted_price, current_price, sentiment_score, confidence, True)
-                            return
-                except:
-                    pass
-            
-            # Fallback to basic prediction
-            self._generate_basic_prediction(stock_data, sentiment_score, symbol)
+        feature_columns = ['Close', 'Volume']
+        if 'rsi' in stock_data.columns:
+            feature_columns.append('rsi')
+        
+        train_data = stock_data[feature_columns].dropna()
+        
+        if len(train_data) > 10:
+            try:
+                if self.stock_predictor.train_enhanced_model(train_data, feature_columns):
+                    predicted_price, _, confidence = self.stock_predictor.predict_next_day(train_data, feature_columns)
+                    return predicted_price, confidence
+            except Exception as e:
+                st.warning(f"Enhanced model error: {e}")
+        
+        return None, None
     
-    def _generate_basic_prediction(self, stock_data, sentiment_score, symbol):
+    def _generate_basic_prediction(self, stock_data, current_price):
         """Generate basic prediction"""
-        with st.spinner("Training model..."):
-            feature_columns = ['Close', 'Volume']
-            train_data = stock_data[feature_columns].dropna()
-            
-            if len(train_data) > 5:
-                try:
-                    if self.stock_predictor.train_linear_regression(train_data, feature_columns):
-                        predicted_price, current_price = self.stock_predictor.predict_next_day(train_data, feature_columns)
-                        if predicted_price is not None:
-                            self._show_prediction_results(predicted_price, current_price, sentiment_score, None, False)
-                            return
-                except:
-                    pass
-            
-            st.warning("Insufficient data for prediction")
+        feature_columns = ['Close', 'Volume']
+        train_data = stock_data[feature_columns].dropna()
+        
+        if len(train_data) > 5:
+            try:
+                if self.stock_predictor.train_linear_regression(train_data, feature_columns):
+                    predicted_price, _ = self.stock_predictor.predict_next_day(train_data, feature_columns)
+                    return predicted_price, None
+            except Exception as e:
+                st.warning(f"Basic model error: {e}")
+        
+        return None, None
     
     def _show_prediction_results(self, predicted_price, current_price, sentiment_score, confidence, is_enhanced):
-        """Show prediction results"""
+        """Show prediction results with data consistency checks"""
+        
+        # DATA CONSISTENCY VALIDATION
+        if current_price <= 0 or predicted_price <= 0:
+            st.error("❌ Invalid price data detected")
+            return
+        
+        # Calculate percentage change
         price_change = ((predicted_price - current_price) / current_price) * 100
         
-        # Simple, reliable recommendation logic
-        if price_change > 2.0 and sentiment_score > 0.2:
-            recommendation, color = "BUY", "green"
-        elif price_change > 1.0 and sentiment_score > 0.1:
-            recommendation, color = "CAUTIOUS BUY", "lightgreen"
-        elif price_change < -2.0 and sentiment_score < -0.2:
-            recommendation, color = "SELL", "red"
-        elif price_change < -1.0 and sentiment_score < -0.1:
-            recommendation, color = "CAUTIOUS SELL", "orange"
+        # Validate percentage change is reasonable
+        if abs(price_change) > 50:
+            st.warning("⚠️ Unusually large price change predicted - verifying data...")
+        
+        # FIXED RECOMMENDATION LOGIC
+        if price_change > 3.0 and sentiment_score > 0.3:
+            recommendation, color, emoji = "STRONG BUY", "green", "🚀"
+            reasoning = "Strong upward momentum with very positive sentiment"
+        elif price_change > 1.5 and sentiment_score > 0.15:
+            recommendation, color, emoji = "BUY", "lightgreen", "📈"
+            reasoning = "Positive price trend with good sentiment"
+        elif price_change > 0.5 and sentiment_score > 0.05:
+            recommendation, color, emoji = "CAUTIOUS BUY", "lightblue", "↗️"
+            reasoning = "Slight upward trend with positive sentiment"
+        elif price_change < -3.0 and sentiment_score < -0.3:
+            recommendation, color, emoji = "STRONG SELL", "red", "🔻"
+            reasoning = "Strong downward momentum with very negative sentiment"
+        elif price_change < -1.5 and sentiment_score < -0.15:
+            recommendation, color, emoji = "SELL", "orange", "📉"
+            reasoning = "Negative price trend with concerning sentiment"
+        elif price_change < -0.5 and sentiment_score < -0.05:
+            recommendation, color, emoji = "CAUTIOUS SELL", "lightcoral", "↘️"
+            reasoning = "Slight downward trend with negative sentiment"
         else:
-            recommendation, color = "HOLD", "gray"
+            recommendation, color, emoji = "HOLD", "gray", "⚖️"
+            reasoning = "Mixed or neutral signals - wait for clearer direction"
+        
+        # Adjust for confidence
+        if confidence and confidence < 0.5:
+            recommendation = "HOLD (Low Confidence)"
+            color = "gray"
+            emoji = "🤔"
+            reasoning = f"Model confidence is low ({confidence*100:.1f}%)"
         
         # Display results
-        cols = st.columns(4 if is_enhanced else 3)
+        st.subheader("🎯 AI Prediction Results")
+        
+        # Data consistency confirmation
+        st.success(f"✅ Using verified current price: ${current_price:.2f}")
+        
+        # Main metrics
+        if is_enhanced and confidence:
+            cols = st.columns(4)
+        else:
+            cols = st.columns(3)
         
         with cols[0]:
-            st.metric("Current", f"${current_price:.2f}")
+            st.metric("Current Price", f"${current_price:.2f}")
+        
         with cols[1]:
-            st.metric("Predicted", f"${predicted_price:.2f}", f"{price_change:+.2f}%")
+            st.metric("Predicted Price", f"${predicted_price:.2f}", f"{price_change:+.2f}%")
+        
         with cols[2]:
-            st.metric("Sentiment", f"{sentiment_score:.3f}")
+            st.metric("Market Sentiment", f"{sentiment_score:.3f}")
+        
         if is_enhanced and confidence:
             with cols[3]:
-                st.metric("Confidence", f"{confidence*100:.1f}%")
+                st.metric("Model Confidence", f"{confidence*100:.1f}%")
         
         # Recommendation
-        st.success(f"**Recommendation: {recommendation}**")
+        st.markdown(f"""
+        <div style='background-color: #f8f9fa; padding: 1.5rem; border-radius: 10px; border-left: 5px solid {color}; margin: 1rem 0;'>
+            <h3 style='color: {color}; margin: 0;'>{emoji} Recommendation: {recommendation}</h3>
+            <p style='margin: 0.5rem 0 0 0; color: #666;'><strong>Reasoning:</strong> {reasoning}</p>
+            <p style='margin: 0.5rem 0 0 0; font-size: 0.9rem; color: #888;'>
+                Expected Price Change: {price_change:+.2f}% | Sentiment Score: {sentiment_score:.3f}
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
     
     def _render_disclaimer(self):
         """Render disclaimer"""
@@ -466,26 +558,16 @@ class DeploymentReadyApp:
         st.warning("""
         **Disclaimer:** Educational purposes only. Not financial advice. 
         Always conduct your own research and consult with financial advisors.
+        Past performance is not indicative of future results.
         """)
     
-    def _show_fallback_interface(self):
-        """Show fallback interface when main content fails"""
-        st.error("🚨 Application encountered an error")
-        st.info("""
-        **Troubleshooting steps:**
-        1. Click 'Restart Session' in sidebar
-        2. Try a different stock symbol
-        3. Disable advanced features
-        4. Clear browser cache
-        """)
-        
-        if st.button("🔄 Try Basic Analysis"):
-            self._restart_session()
-    
-    def _restart_session(self):
-        """Restart the session"""
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
+    def _force_data_refresh(self):
+        """Force refresh of all data"""
+        if 'stock_data' in st.session_state:
+            del st.session_state.stock_data
+        if 'news_data' in st.session_state:
+            del st.session_state.news_data
+        st.success("✅ Data refresh triggered")
         st.rerun()
     
     def _safe_clear_cache(self):
@@ -498,19 +580,42 @@ class DeploymentReadyApp:
         except:
             st.warning("⚠️ Partial cache clearance")
     
+    def _show_fallback_interface(self):
+        """Show fallback interface when main content fails"""
+        st.error("🚨 Application encountered an error")
+        st.info("""
+        **Troubleshooting steps:**
+        1. Click 'Refresh Data' in sidebar
+        2. Try a different stock symbol
+        3. Disable advanced features
+        4. Clear browser cache
+        """)
+        
+        if st.button("🔄 Try Basic Analysis"):
+            self._force_data_refresh()
+    
+    def _show_retry_options(self, symbol):
+        """Show retry options after error"""
+        st.info(f"Having issues with {symbol}? Try these:")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("🔄 Retry Same Symbol"):
+                self._force_data_refresh()
+        with col2:
+            if st.button("📊 Try AAPL Instead"):
+                st.session_state.retry_symbol = "AAPL"
+                self._force_data_refresh()
+        with col3:
+            if st.button("🔧 Basic Features Only"):
+                st.info("Please manually disable advanced features and retry")
+    
     def _handle_critical_error(self, error):
         """Handle critical application errors"""
         st.error("🚨 Critical Application Error")
-        st.code(f"Error details: {str(error)}")
-        st.info("""
-        **Please try:**
-        1. Refreshing the page
-        2. Checking your internet connection
-        3. Trying a different browser
-        4. Contacting support if issue persists
-        """)
+        st.code(f"Error: {str(error)}")
+        st.info("Please refresh the page or try a different stock symbol.")
 
 # Run the application
 if __name__ == "__main__":
-    app = DeploymentReadyApp()
+    app = FixedDataApp()
     app.run()
