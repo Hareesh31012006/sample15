@@ -22,79 +22,129 @@ class DataFetcher:
         else:
             st.sidebar.warning("GNews API key not found")
     
-    def get_stock_data_yahoo(self, symbol, period='6mo'):
-        """Fetch stock data from Yahoo Finance"""
-        try:
-            stock = yf.Ticker(symbol)
-            data = stock.history(period=period)
-            if data.empty:
-                st.error(f"No data found for symbol: {symbol}")
-                return None
-            
-            # Calculate technical indicators
+    def get_stock_data(self, symbol, period='6mo'):
+        """Fetch stock data with multiple fallback sources"""
+        # Try Yahoo Finance first
+        st.info(f"Fetching data for {symbol}...")
+        
+        data = self._get_stock_data_yahoo(symbol, period)
+        if data is not None and not data.empty:
+            st.success(f"✓ Data fetched successfully for {symbol}")
             data = self.calculate_technical_indicators(data)
             return data
+        
+        # If Yahoo fails, try Alpha Vantage
+        st.warning("Yahoo Finance failed, trying Alpha Vantage...")
+        data = self._get_stock_data_alpha_vantage(symbol)
+        if data is not None and not data.empty:
+            st.success(f"✓ Alpha Vantage data fetched for {symbol}")
+            data = self.calculate_technical_indicators(data)
+            return data
+        
+        # If both fail, show error
+        st.error(f"❌ Could not fetch data for {symbol} from any source. Please check the symbol and try again.")
+        return None
+    
+    def _get_stock_data_yahoo(self, symbol, period='6mo'):
+        """Fetch stock data from Yahoo Finance with error handling"""
+        try:
+            # Add .NS for Indian stocks, otherwise keep as is
+            if not any(ext in symbol.upper() for ext in ['.NS', '.BO', '.BS']):
+                symbol_to_fetch = symbol
+            else:
+                symbol_to_fetch = symbol
+            
+            stock = yf.Ticker(symbol_to_fetch)
+            
+            # Try multiple period formats
+            try:
+                data = stock.history(period=period)
+            except:
+                # If period fails, try using start/end dates
+                end_date = datetime.now()
+                start_date = end_date - timedelta(days=180)  # 6 months
+                data = stock.history(start=start_date, end=end_date)
+            
+            if data.empty:
+                # Try with .NS suffix for Indian stocks
+                if not symbol.upper().endswith('.NS'):
+                    return self._get_stock_data_yahoo(symbol + '.NS', period)
+                return None
+            
+            # Ensure we have the required columns
+            required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+            for col in required_columns:
+                if col not in data.columns:
+                    st.error(f"Missing column {col} in data")
+                    return None
+            
+            return data
+            
         except Exception as e:
-            st.error(f"Error fetching data for {symbol}: {e}")
+            st.warning(f"Yahoo Finance error for {symbol}: {str(e)}")
             return None
     
-    def get_stock_data_alpha_vantage(self, symbol):
+    def _get_stock_data_alpha_vantage(self, symbol):
         """Fetch stock data from Alpha Vantage"""
         try:
+            if self.alpha_vantage_key == 'demo':
+                st.warning("Using Alpha Vantage demo key - limited functionality")
+            
             ts = TimeSeries(key=self.alpha_vantage_key, output_format='pandas')
             data, meta_data = ts.get_daily(symbol=symbol, outputsize='compact')
+            
+            if data.empty:
+                return None
+            
+            # Rename columns to match Yahoo Finance format
+            data.columns = [col.split(' ')[1] for col in data.columns]
+            data = data.rename(columns={
+                'open': 'Open',
+                'high': 'High', 
+                'low': 'Low',
+                'close': 'Close',
+                'volume': 'Volume'
+            })
+            
             return data
+            
         except Exception as e:
-            st.error(f"Alpha Vantage error: {e}")
+            st.warning(f"Alpha Vantage error for {symbol}: {str(e)}")
             return None
     
     def calculate_technical_indicators(self, df):
         """Calculate technical indicators using pure Python only"""
         try:
-            # RSI - Relative Strength Index
-            df['rsi'] = self._calculate_rsi(df['Close'])
-            
-            # MACD - Moving Average Convergence Divergence
-            macd, macd_signal, macd_hist = self._calculate_macd(df['Close'])
-            df['macd'] = macd
-            df['macd_signal'] = macd_signal
-            df['macd_hist'] = macd_hist
-            
-            # Moving Averages
+            # Basic indicators that always work
             df['sma_20'] = df['Close'].rolling(window=20).mean()
             df['sma_50'] = df['Close'].rolling(window=50).mean()
-            
-            # Exponential Moving Averages
-            df['ema_12'] = df['Close'].ewm(span=12).mean()
-            df['ema_26'] = df['Close'].ewm(span=26).mean()
-            
-            # Bollinger Bands
-            bb_upper, bb_middle, bb_lower = self._calculate_bollinger_bands(df['Close'])
-            df['bb_upper'] = bb_upper
-            df['bb_middle'] = bb_middle
-            df['bb_lower'] = bb_lower
-            
-            # Volume indicators
             df['volume_sma'] = df['Volume'].rolling(window=20).mean()
             
-            # Price rate of change
-            df['roc'] = self._calculate_roc(df['Close'])
+            # Try advanced indicators (might fail if insufficient data)
+            try:
+                # RSI
+                df['rsi'] = self._calculate_rsi(df['Close'])
+                
+                # MACD
+                macd, macd_signal, macd_hist = self._calculate_macd(df['Close'])
+                df['macd'] = macd
+                df['macd_signal'] = macd_signal
+                df['macd_hist'] = macd_hist
+                
+                # Bollinger Bands
+                bb_upper, bb_middle, bb_lower = self._calculate_bollinger_bands(df['Close'])
+                df['bb_upper'] = bb_upper
+                df['bb_middle'] = bb_middle
+                df['bb_lower'] = bb_lower
+                
+            except Exception as e:
+                st.warning(f"Some technical indicators couldn't be calculated: {e}")
             
-            # Stochastic Oscillator
-            k, d = self._calculate_stochastic(df['High'], df['Low'], df['Close'])
-            df['stoch_k'] = k
-            df['stoch_d'] = d
-            
-            # Average True Range (ATR)
-            df['atr'] = self._calculate_atr(df['High'], df['Low'], df['Close'])
-            
-            # On Balance Volume (OBV)
-            df['obv'] = self._calculate_obv(df['Close'], df['Volume'])
+            return df
             
         except Exception as e:
-            st.warning(f"Error calculating some technical indicators: {e}")
-        
-        return df
+            st.error(f"Error calculating technical indicators: {e}")
+            return df
     
     def _calculate_rsi(self, prices, window=14):
         """Calculate RSI using pure Python"""
@@ -132,45 +182,6 @@ class DataFetcher:
         except:
             nan_series = pd.Series([np.nan] * len(prices), index=prices.index)
             return nan_series, nan_series, nan_series
-    
-    def _calculate_roc(self, prices, window=12):
-        """Calculate Rate of Change"""
-        try:
-            return ((prices / prices.shift(window)) - 1) * 100
-        except:
-            return pd.Series([np.nan] * len(prices), index=prices.index)
-    
-    def _calculate_stochastic(self, high, low, close, k_window=14, d_window=3):
-        """Calculate Stochastic Oscillator %K and %D"""
-        try:
-            lowest_low = low.rolling(window=k_window).min()
-            highest_high = high.rolling(window=k_window).max()
-            k = ((close - lowest_low) / (highest_high - lowest_low)) * 100
-            d = k.rolling(window=d_window).mean()
-            return k, d
-        except:
-            nan_series = pd.Series([np.nan] * len(close), index=close.index)
-            return nan_series, nan_series
-    
-    def _calculate_atr(self, high, low, close, window=14):
-        """Calculate Average True Range"""
-        try:
-            tr1 = high - low
-            tr2 = abs(high - close.shift())
-            tr3 = abs(low - close.shift())
-            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-            atr = tr.rolling(window=window).mean()
-            return atr
-        except:
-            return pd.Series([np.nan] * len(high), index=high.index)
-    
-    def _calculate_obv(self, close, volume):
-        """Calculate On Balance Volume"""
-        try:
-            obv = (volume * (~close.diff().le(0) * 2 - 1)).cumsum()
-            return obv
-        except:
-            return pd.Series([np.nan] * len(close), index=close.index)
     
     def get_news_data(self, symbol, days=7):
         """Fetch news data using GNews API with Yahoo fallback"""
@@ -260,41 +271,6 @@ class DataFetcher:
                 'description': f'Market analysts recommend {symbol} as strong investment opportunity.',
                 'published_at': (datetime.now() - timedelta(days=1)).isoformat(),
                 'source': 'Bloomberg'
-            },
-            {
-                'title': f'{symbol} expands into new markets',
-                'description': f'Strategic expansion expected to increase {symbol} market share.',
-                'published_at': (datetime.now() - timedelta(days=2)).isoformat(),
-                'source': 'Reuters'
-            },
-            {
-                'title': f'Industry trends favor {symbol} growth',
-                'description': f'Sector analysis shows favorable conditions for {symbol} performance.',
-                'published_at': (datetime.now() - timedelta(days=3)).isoformat(),
-                'source': 'MarketWatch'
             }
         ]
         return pd.DataFrame(sample_news)
-    
-    def get_market_summary(self, symbol):
-        """Get quick market summary for a stock"""
-        try:
-            stock = yf.Ticker(symbol)
-            info = stock.info
-            
-            summary = {
-                'company_name': info.get('longName', 'N/A'),
-                'sector': info.get('sector', 'N/A'),
-                'industry': info.get('industry', 'N/A'),
-                'market_cap': info.get('marketCap', 'N/A'),
-                'pe_ratio': info.get('trailingPE', 'N/A'),
-                'dividend_yield': info.get('dividendYield', 'N/A'),
-                '52_week_high': info.get('fiftyTwoWeekHigh', 'N/A'),
-                '52_week_low': info.get('fiftyTwoWeekLow', 'N/A'),
-                'average_volume': info.get('averageVolume', 'N/A')
-            }
-            
-            return summary
-        except Exception as e:
-            st.warning(f"Error fetching market summary: {e}")
-            return {}
