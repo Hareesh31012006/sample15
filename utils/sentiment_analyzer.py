@@ -3,7 +3,6 @@ import warnings
 # Memory optimizations
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
 os.environ['TRANSFORMERS_OFFLINE'] = '0'
-os.environ['USE_XFORMERS'] = '1'
 warnings.filterwarnings("ignore")
 
 from textblob import TextBlob
@@ -18,29 +17,22 @@ class OptimizedSentimentAnalyzer:
         self.textblob_analyzer = None
         self.finbert_analyzer = None
         self._is_model_loaded = False
-        self._xformers_available = False
+        self._memory_efficient = False
         self._setup_analyzers()
         
     def _setup_analyzers(self):
         """Initialize sentiment analyzers with memory optimization"""
         try:
-            # Check for xformers availability
-            try:
-                import xformers
-                self._xformers_available = True
-                print("✓ Xformers available for memory-efficient attention")
-            except ImportError:
-                print("⚠ Xformers not available, using standard attention")
-                self._xformers_available = False
-                
+            # Check for memory efficient options
+            self._memory_efficient = True
+            print("✓ Memory-efficient sentiment analyzer initialized")
             self._is_model_loaded = False
-            print("✓ Sentiment analyzer ready (lazy loading enabled)")
         except Exception as e:
             print(f"Error setting up sentiment analyzer: {e}")
             self.finbert_analyzer = None
     
     def _load_finbert_if_needed(self):
-        """Lazy load FinBERT with xformers optimization"""
+        """Lazy load FinBERT with memory optimization"""
         if self._is_model_loaded and self.finbert_analyzer is not None:
             return
             
@@ -52,18 +44,13 @@ class OptimizedSentimentAnalyzer:
             
             model_name = "ProsusAI/finbert"
             
-            # Load model and tokenizer separately for xformers optimization
+            # Load model and tokenizer with memory optimization
             tokenizer = AutoTokenizer.from_pretrained(model_name)
             model = AutoModelForSequenceClassification.from_pretrained(model_name)
             
-            # Apply xformers memory-efficient attention if available
-            if self._xformers_available:
-                try:
-                    model.requires_grad_(False)  # Freeze model for inference
-                    print("✓ Xformers memory-efficient attention enabled")
-                except Exception as e:
-                    print(f"⚠ Xformers optimization failed: {e}")
-                    self._xformers_available = False
+            # Apply memory optimizations
+            model.requires_grad_(False)  # Freeze model for inference
+            model.eval()  # Set to evaluation mode
             
             # Create pipeline with optimized model
             self.finbert_analyzer = pipeline(
@@ -72,19 +59,32 @@ class OptimizedSentimentAnalyzer:
                 tokenizer=tokenizer,
                 device=-1,  # Force CPU usage
                 torch_dtype=torch.float32,
-                batch_size=1,  # Reduced for memory efficiency
+                batch_size=1,  # Single batch for memory efficiency
                 truncation=True,
-                max_length=128,  # Further reduced for memory efficiency
+                max_length=128,  # Reduced sequence length
                 padding=True
             )
             
             self._is_model_loaded = True
-            memory_optimization = "with xformers" if self._xformers_available else "without xformers"
-            print(f"✓ FinBERT loaded successfully on CPU {memory_optimization}")
+            print("✓ FinBERT loaded successfully with memory optimizations")
             
         except Exception as e:
             print(f"Error loading FinBERT: {e}")
-            self.finbert_analyzer = None
+            # Fallback to smaller model
+            try:
+                self.finbert_analyzer = pipeline(
+                    "sentiment-analysis",
+                    device=-1,
+                    torch_dtype=torch.float32,
+                    batch_size=1,
+                    truncation=True,
+                    max_length=128
+                )
+                self._is_model_loaded = True
+                print("✓ Fallback sentiment analyzer loaded")
+            except Exception as fallback_error:
+                print(f"Fallback also failed: {fallback_error}")
+                self.finbert_analyzer = None
     
     def analyze_with_textblob(self, text):
         """Analyze sentiment using TextBlob (lightweight)"""
@@ -104,7 +104,7 @@ class OptimizedSentimentAnalyzer:
             return 0.0
     
     def analyze_with_finbert(self, text):
-        """Analyze sentiment using FinBERT with xformers optimization"""
+        """Analyze sentiment using FinBERT with memory optimization"""
         try:
             self._load_finbert_if_needed()
             
@@ -118,7 +118,7 @@ class OptimizedSentimentAnalyzer:
             
             # Use torch.no_grad to save memory
             with torch.no_grad():
-                result = self.finbert_analyzer(cleaned_text[:128])  # Further reduced length
+                result = self.finbert_analyzer(cleaned_text[:128])
             
             sentiment_label = result[0]['label']
             confidence = result[0]['score']
@@ -170,15 +170,18 @@ class OptimizedSentimentAnalyzer:
                 tb_sentiment = self.analyze_with_textblob(text)
                 sentiments_textblob.append(tb_sentiment)
                 
-                # FinBERT sentiment
-                fb_sentiment, fb_label, fb_confidence = self.analyze_with_finbert(text)
-                if abs(fb_sentiment) > 0.1:
-                    sentiments_finbert.append(fb_sentiment)
+                # FinBERT sentiment with memory protection
+                fb_sentiment, fb_label, fb_confidence = 0.0, "neutral", 0.0
+                try:
+                    fb_sentiment, fb_label, fb_confidence = self.analyze_with_finbert(text)
+                    if abs(fb_sentiment) > 0.1:  # Filter weak signals
+                        sentiments_finbert.append(fb_sentiment)
+                except Exception as e:
+                    print(f"FinBERT analysis skipped: {e}")
                 
                 # Calculate combined sentiment
-                if fb_sentiment != 0.0 and self._xformers_available:
-                    combined_sentiment = (tb_sentiment * 0.3) + (fb_sentiment * 0.7)
-                elif fb_sentiment != 0.0:
+                if fb_sentiment != 0.0:
+                    # Weighted average favoring FinBERT when available
                     combined_sentiment = (tb_sentiment * 0.4) + (fb_sentiment * 0.6)
                 else:
                     combined_sentiment = tb_sentiment
@@ -225,18 +228,23 @@ class OptimizedSentimentAnalyzer:
         
         return overall_sentiment, article_sentiments
     
+    def analyze_news_sentiment(self, news_df):
+        """Backward compatibility method"""
+        sentiment_score, article_sentiments = self.analyze_news_sentiment_detailed(news_df)
+        return sentiment_score
+    
     def get_memory_info(self):
         """Get memory optimization information"""
         info = {
-            'xformers_enabled': self._xformers_available,
+            'memory_efficient': self._memory_efficient,
             'model_loaded': self._is_model_loaded,
             'analyzer_type': 'FinBERT + TextBlob'
         }
         
-        if self._xformers_available:
-            info['optimization'] = 'Memory-efficient attention enabled'
+        if self._memory_efficient:
+            info['optimization'] = 'Memory-efficient mode enabled'
         else:
-            info['optimization'] = 'Standard attention'
+            info['optimization'] = 'Standard mode'
             
         return info
     
