@@ -44,6 +44,58 @@ class MemoryOptimizedNextTickApp:
         except Exception as e:
             st.error(f"Error initializing app: {e}")
     
+    def _smart_memory_management(self):
+        """Smart memory management that doesn't affect accuracy"""
+        if 'analysis_count' not in st.session_state:
+            st.session_state.analysis_count = 0
+            st.session_state.last_memory_clear = datetime.now()
+        
+        st.session_state.analysis_count += 1
+        
+        # Clear memory only after 3 analyses or 5 minutes
+        current_time = datetime.now()
+        time_since_clear = (current_time - st.session_state.last_memory_clear).total_seconds()
+        
+        if st.session_state.analysis_count >= 3 or time_since_clear > 300:  # 5 minutes
+            st.session_state.analysis_count = 0
+            st.session_state.last_memory_clear = current_time
+            self._clear_memory_cache()
+    
+    def _clear_memory_cache(self):
+        """Enhanced memory clearing without losing accuracy"""
+        import gc
+        try:
+            # Clear sentiment analyzer memory
+            if self.sentiment_analyzer:
+                self.sentiment_analyzer.cleanup()
+            
+            # Clear large data objects but keep current analysis
+            current_data = {}
+            if 'stock_data' in st.session_state:
+                current_data['stock_data'] = st.session_state.stock_data
+            if 'news_data' in st.session_state:
+                current_data['news_data'] = st.session_state.news_data
+            if 'current_cache_key' in st.session_state:
+                current_data['current_cache_key'] = st.session_state.current_cache_key
+            if 'current_symbol' in st.session_state:
+                current_data['current_symbol'] = st.session_state.current_symbol
+            
+            # Clear all session state
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            
+            # Restore current analysis data
+            for key, value in current_data.items():
+                st.session_state[key] = value
+            
+            # Force garbage collection
+            gc.collect()
+            
+            st.success("🔄 Memory optimized! Model accuracy maintained.")
+            
+        except Exception as e:
+            st.warning(f"Memory optimization note: {e}")
+    
     def run(self):
         # Header
         st.markdown('<h1 class="main-header">📈 NextTick AI Stock Prediction</h1>', unsafe_allow_html=True)
@@ -83,22 +135,6 @@ class MemoryOptimizedNextTickApp:
         - Efficient memory management
         """)
     
-    def _clear_memory_cache(self):
-        """Clear memory cache efficiently"""
-        import gc
-        if self.sentiment_analyzer:
-            self.sentiment_analyzer.cleanup()
-        
-        # Clear session state selectively
-        keys_to_keep = ['current_symbol', 'current_cache_key']
-        keys_to_delete = [key for key in st.session_state.keys() if key not in keys_to_keep]
-        
-        for key in keys_to_delete:
-            del st.session_state[key]
-        
-        gc.collect()
-        st.success("Memory cache cleared!")
-    
     def _handle_error(self, error):
         """Handle errors with memory cleanup"""
         st.error(f"Application error: {str(error)}")
@@ -108,13 +144,22 @@ class MemoryOptimizedNextTickApp:
         self._clear_memory_cache()
     
     def analyze_stock(self, symbol, period, use_technical_indicators, use_sentiment_analysis):
-        """Optimized stock analysis with memory management"""
+        """Optimized stock analysis with smart memory management"""
         try:
+            # Use smart memory management
+            self._smart_memory_management()
+            
             # Initialize session state for data
             cache_key = f"{symbol}_{period}"
             if 'stock_data' not in st.session_state or st.session_state.get('current_cache_key') != cache_key:
                 with st.spinner(f"📊 Fetching data for {symbol}..."):
-                    # Fetch stock data
+                    # Clear previous data first
+                    if 'stock_data' in st.session_state:
+                        del st.session_state.stock_data
+                    if 'news_data' in st.session_state:
+                        del st.session_state.news_data
+                    
+                    # Fetch new data
                     stock_data = self.data_fetcher.get_stock_data(symbol, period)
                     
                     if stock_data is None or stock_data.empty:
