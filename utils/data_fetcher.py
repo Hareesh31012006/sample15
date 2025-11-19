@@ -186,6 +186,12 @@ class DataFetcher:
                 df['macd_signal'] = macd_signal
                 df['macd_hist'] = macd_hist
                 
+                # Bollinger Bands
+                bb_upper, bb_middle, bb_lower = self._calculate_bollinger_bands(df['Close'])
+                df['bb_upper'] = bb_upper
+                df['bb_middle'] = bb_middle
+                df['bb_lower'] = bb_lower
+                
             except Exception as e:
                 st.warning(f"Some technical indicators unavailable: {e}")
             
@@ -216,6 +222,18 @@ class DataFetcher:
             macd_signal = macd.ewm(span=signal).mean()
             macd_hist = macd - macd_signal
             return macd, macd_signal, macd_hist
+        except:
+            nan_series = pd.Series([np.nan] * len(prices), index=prices.index)
+            return nan_series, nan_series, nan_series
+    
+    def _calculate_bollinger_bands(self, prices, window=20, num_std=2):
+        """Calculate Bollinger Bands"""
+        try:
+            middle_band = prices.rolling(window=window).mean()
+            std = prices.rolling(window=window).std()
+            upper_band = middle_band + (std * num_std)
+            lower_band = middle_band - (std * num_std)
+            return upper_band, middle_band, lower_band
         except:
             nan_series = pd.Series([np.nan] * len(prices), index=prices.index)
             return nan_series, nan_series, nan_series
@@ -258,19 +276,79 @@ class DataFetcher:
         return pd.DataFrame()
     
     def _get_sample_news_data(self, symbol):
-        """Generate sample news data"""
+        """Generate more realistic sample news data"""
+        current_time = datetime.now()
+        
         sample_news = [
             {
-                'title': f'Market analysis for {symbol} shows positive trends',
-                'description': f'Technical indicators suggest favorable conditions for {symbol} in current market.',
-                'published_at': datetime.now().isoformat(),
-                'source': 'Market Analysis'
+                'title': f'{symbol} Shows Strong Quarterly Earnings Growth',
+                'description': f'{symbol} reported better-than-expected earnings this quarter, with revenue growth exceeding analyst projections by 15%. The company continues to demonstrate robust financial performance.',
+                'published_at': current_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'source': 'Financial Times'
             },
             {
-                'title': f'{symbol} demonstrates strong fundamentals',
-                'description': f'Recent performance indicators show {symbol} maintaining competitive position.',
-                'published_at': (datetime.now() - timedelta(hours=2)).isoformat(),
-                'source': 'Financial Review'
+                'title': f'Analysts Upgrade {symbol} Stock Rating to "Buy"',
+                'description': f'Several major investment firms have upgraded their rating on {symbol} citing strong market position and growth potential in emerging markets.',
+                'published_at': (current_time - timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'source': 'Market Watch'
+            },
+            {
+                'title': f'{symbol} Announces Revolutionary New Product Launch',
+                'description': f'The company unveiled its latest product line, expected to drive significant revenue growth in the coming quarters and capture new market segments.',
+                'published_at': (current_time - timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'source': 'Tech News Daily'
+            },
+            {
+                'title': f'{symbol} Faces Regulatory Challenges in European Market',
+                'description': f'Recent regulatory changes may impact {symbol} operations in key European markets, according to industry analysts. The company is working closely with regulators.',
+                'published_at': (current_time - timedelta(days=2)).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'source': 'Business Daily'
+            },
+            {
+                'title': f'Institutional Investors Increase Stakes in {symbol}',
+                'description': f'Recent SEC filings show major institutional investors have significantly increased their positions in {symbol}, signaling strong confidence in long-term growth prospects.',
+                'published_at': (current_time - timedelta(days=3)).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'source': 'Investor Digest'
+            },
+            {
+                'title': f'{symbol} Expands into Asian Markets with New Partnerships',
+                'description': f'The company announced strategic partnerships in key Asian markets, positioning itself for international expansion and diversified revenue streams.',
+                'published_at': (current_time - timedelta(days=4)).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'source': 'Global Business Review'
+            },
+            {
+                'title': f'{symbol} CEO Discusses Future Innovation Strategy',
+                'description': f'In a recent interview, the CEO outlined the company\'s commitment to innovation and R&D investment, highlighting upcoming technological advancements.',
+                'published_at': (current_time - timedelta(days=5)).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'source': 'Executive Insights'
             }
         ]
         return pd.DataFrame(sample_news)
+    
+    def get_market_summary(self, symbols=['AAPL', 'GOOGL', 'MSFT', 'TSLA', 'AMZN']):
+        """Get quick market summary for major stocks"""
+        try:
+            summary_data = []
+            for symbol in symbols[:3]:  # Limit to 3 for performance
+                try:
+                    data = self.get_stock_data(symbol, '1d')
+                    if data is not None and not data.empty:
+                        current_price = data['Close'].iloc[-1]
+                        prev_price = data['Close'].iloc[-2] if len(data) > 1 else current_price
+                        change = current_price - prev_price
+                        change_percent = (change / prev_price) * 100
+                        
+                        summary_data.append({
+                            'Symbol': symbol,
+                            'Price': f"${current_price:.2f}",
+                            'Change': f"{change:+.2f}",
+                            'Change %': f"{change_percent:+.2f}%",
+                            'Trend': '📈' if change > 0 else '📉' if change < 0 else '➡️'
+                        })
+                except:
+                    continue
+            
+            return pd.DataFrame(summary_data)
+        except Exception as e:
+            st.warning(f"Market summary error: {e}")
+            return pd.DataFrame()
