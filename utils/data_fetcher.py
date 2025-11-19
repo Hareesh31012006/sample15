@@ -23,60 +23,123 @@ class DataFetcher:
             st.sidebar.warning("GNews API key not found")
     
     def get_stock_data(self, symbol, period='6mo'):
-        """Fetch stock data with multiple fallback sources"""
-        # Try Yahoo Finance first
-        st.info(f"Fetching data for {symbol}...")
+        """Fetch stock data with enhanced validation and multiple fallback sources"""
+        st.info(f"🔍 Fetching validated data for {symbol}...")
         
+        # Try Yahoo Finance first
         data = self._get_stock_data_yahoo(symbol, period)
         if data is not None and not data.empty:
-            st.success(f"✓ Data fetched successfully for {symbol}")
-            data = self.calculate_technical_indicators(data)
-            return data
+            is_valid, message = self._validate_data_quality(data, symbol)
+            if is_valid:
+                st.success(f"✅ Yahoo Finance data validated for {symbol}")
+                data = self.calculate_technical_indicators(data)
+                return data
+            else:
+                st.warning(f"⚠️ Yahoo data quality issue: {message}")
         
         # If Yahoo fails, try Alpha Vantage
-        st.warning("Yahoo Finance failed, trying Alpha Vantage...")
+        st.warning("🔄 Trying Alpha Vantage as backup...")
         data = self._get_stock_data_alpha_vantage(symbol)
         if data is not None and not data.empty:
-            st.success(f"✓ Alpha Vantage data fetched for {symbol}")
-            data = self.calculate_technical_indicators(data)
-            return data
+            is_valid, message = self._validate_data_quality(data, symbol)
+            if is_valid:
+                st.success(f"✅ Alpha Vantage data validated for {symbol}")
+                data = self.calculate_technical_indicators(data)
+                return data
         
-        # If both fail, show error
-        st.error(f"❌ Could not fetch data for {symbol} from any source. Please check the symbol and try again.")
+        # Final fallback with clear error
+        st.error(f"❌ Could not fetch valid data for {symbol}")
+        st.info("💡 Try popular symbols like: AAPL, TSLA, MSFT, GOOGL, AMZN")
         return None
     
-    def _get_stock_data_yahoo(self, symbol, period='6mo'):
-        """Fetch stock data from Yahoo Finance with error handling"""
-        try:
-            # Add .NS for Indian stocks, otherwise keep as is
-            if not any(ext in symbol.upper() for ext in ['.NS', '.BO', '.BS']):
-                symbol_to_fetch = symbol
-            else:
-                symbol_to_fetch = symbol
+    def _validate_data_quality(self, data, symbol):
+        """Enhanced data quality validation"""
+        if data.empty or data is None:
+            return False, "Empty dataset"
+        
+        # Check required columns
+        required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+        missing_cols = [col for col in required_cols if col not in data.columns]
+        if missing_cols:
+            return False, f"Missing columns: {missing_cols}"
+        
+        # Check for NaN values in critical columns
+        critical_data = data[['Close', 'Volume']].tail(5)  # Check last 5 entries
+        if critical_data.isna().any().any():
+            return False, "Missing values in critical data"
+        
+        # Check price validity
+        latest_close = data['Close'].iloc[-1]
+        if latest_close <= 0:
+            return False, f"Invalid price: ${latest_close:.2f}"
+        
+        if latest_close > 100000:  # Unreasonably high price
+            return False, f"Suspiciously high price: ${latest_close:.2f}"
+        
+        # Check volume validity
+        latest_volume = data['Volume'].iloc[-1]
+        if latest_volume < 0:
+            return False, f"Invalid volume: {latest_volume}"
+        
+        # Check data consistency - look for large price jumps
+        if len(data) > 1:
+            recent_prices = data['Close'].tail(10)
+            price_changes = recent_prices.pct_change().dropna()
+            large_jumps = price_changes[abs(price_changes) > 0.5]  # More than 50% change
             
-            stock = yf.Ticker(symbol_to_fetch)
+            if not large_jumps.empty:
+                return False, f"Large price jumps detected in recent data"
+        
+        # Check data freshness
+        if hasattr(data.index, 'max'):
+            latest_date = data.index.max()
+            if isinstance(latest_date, (pd.Timestamp, datetime)):
+                days_old = (datetime.now() - latest_date).days
+                if days_old > 7:
+                    return False, f"Data is {days_old} days old"
+        
+        return True, "Data quality validated"
+    
+    def _get_stock_data_yahoo(self, symbol, period='6mo'):
+        """Fetch stock data from Yahoo Finance with enhanced error handling"""
+        try:
+            # Clean symbol format
+            clean_symbol = symbol.upper().strip()
+            
+            stock = yf.Ticker(clean_symbol)
             
             # Try multiple period formats
             try:
                 data = stock.history(period=period)
             except:
-                # If period fails, try using start/end dates
+                # Fallback to specific date range
                 end_date = datetime.now()
-                start_date = end_date - timedelta(days=180)  # 6 months
+                start_date = end_date - timedelta(days=180)
                 data = stock.history(start=start_date, end=end_date)
             
             if data.empty:
-                # Try with .NS suffix for Indian stocks
-                if not symbol.upper().endswith('.NS'):
-                    return self._get_stock_data_yahoo(symbol + '.NS', period)
+                # Try with common suffixes for different exchanges
+                suffixes = ['.NS', '.BO', '.AX', '.TO', '.L', '.DE', '.PA', '.MI']
+                for suffix in suffixes:
+                    if not clean_symbol.endswith(suffix):
+                        try:
+                            st.info(f"🔄 Trying {clean_symbol}{suffix}...")
+                            alternative_data = self._get_stock_data_yahoo(clean_symbol + suffix, period)
+                            if alternative_data is not None and not alternative_data.empty:
+                                return alternative_data
+                        except:
+                            continue
                 return None
             
-            # Ensure we have the required columns
+            # Validate we have the required columns
             required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
             for col in required_columns:
                 if col not in data.columns:
-                    st.error(f"Missing column {col} in data")
+                    st.error(f"Missing column {col} in Yahoo Finance data")
                     return None
+            
+            # Ensure data is sorted by date
+            data = data.sort_index()
             
             return data
             
@@ -105,6 +168,9 @@ class DataFetcher:
                 'close': 'Close',
                 'volume': 'Volume'
             })
+            
+            # Ensure data is sorted by date
+            data = data.sort_index()
             
             return data
             
