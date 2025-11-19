@@ -5,6 +5,9 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
+import traceback
+import gc
+import sys
 
 # Import custom modules
 from utils.data_fetcher import DataFetcher
@@ -50,16 +53,27 @@ st.markdown("""
         background-color: #fff3cd;
         border-left: 5px solid #ffc107;
     }
+    .error-message {
+        background-color: #f8d7da;
+        color: #721c24;
+        padding: 1rem;
+        border-radius: 5px;
+        border-left: 5px solid #dc3545;
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 class NextTickApp:
     def __init__(self):
-        self.data_fetcher = DataFetcher()
-        self.sentiment_analyzer = SentimentAnalyzer()
-        self.stock_predictor = StockPredictor()
-        self.visualizer = StockVisualizer()
-        
+        try:
+            self.data_fetcher = DataFetcher()
+            self.sentiment_analyzer = SentimentAnalyzer()
+            self.stock_predictor = StockPredictor()
+            self.visualizer = StockVisualizer()
+        except Exception as e:
+            st.error(f"Error initializing app: {e}")
+    
     def run(self):
         # Header
         st.markdown('<h1 class="main-header">📈 NextTick AI Stock Prediction</h1>', unsafe_allow_html=True)
@@ -68,23 +82,32 @@ class NextTickApp:
         st.sidebar.title("Configuration")
         
         # Stock symbol input
-        symbol = st.sidebar.text_input("Enter Stock Symbol", "AAPL").upper()
+        symbol = st.sidebar.text_input("Enter Stock Symbol", "TSLA").upper()
         
         # Analysis period
         period = st.sidebar.selectbox(
             "Data Period",
-            ["1mo", "3mo", "6mo", "1y", "2y"],
-            index=2
+            ["1mo", "3mo", "6mo", "1y"],
+            index=1
         )
         
         # Feature selection
         st.sidebar.subheader("Model Features")
         use_technical_indicators = st.sidebar.checkbox("Use Technical Indicators", True)
         use_sentiment_analysis = st.sidebar.checkbox("Use Sentiment Analysis", True)
+        use_ml_prediction = st.sidebar.checkbox("Use ML Prediction", True)
+        
+        # Clear cache button
+        if st.sidebar.button("Clear Cache & Restart"):
+            self.clear_cache()
+            st.rerun()
         
         # Main content
         if st.sidebar.button("Analyze Stock") or symbol:
-            self.analyze_stock(symbol, period, use_technical_indicators, use_sentiment_analysis)
+            try:
+                self.analyze_stock(symbol, period, use_technical_indicators, use_sentiment_analysis, use_ml_prediction)
+            except Exception as e:
+                self.handle_error(e)
         
         # About section in sidebar
         st.sidebar.markdown("---")
@@ -99,35 +122,124 @@ class NextTickApp:
         For intelligent stock market insights.
         """)
     
-    def analyze_stock(self, symbol, period, use_technical_indicators, use_sentiment_analysis):
-        """Main analysis function"""
+    def clear_cache(self):
+        """Clear session state and free memory"""
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        gc.collect()
+        st.success("Cache cleared! Please refresh the page.")
+    
+    def handle_error(self, error):
+        """Handle application errors gracefully"""
+        st.markdown(f"""
+        <div class="error-message">
+            <h4>🚨 Application Error</h4>
+            <p><strong>Error:</strong> {str(error)}</p>
+            <p>This might be due to API rate limits or memory issues.</p>
+        </div>
+        """, unsafe_allow_html=True)
         
-        # Initialize session state for data
-        if 'stock_data' not in st.session_state or st.session_state.get('current_symbol') != symbol:
-            with st.spinner(f"Fetching data for {symbol}..."):
-                # Fetch stock data
-                stock_data = self.data_fetcher.get_stock_data(symbol, period)
-                
-                if stock_data is None or stock_data.empty:
-                    st.error(f"Could not fetch data for {symbol}. Please check the symbol and try again.")
-                    return
-                
-                # Calculate technical indicators
-                if use_technical_indicators:
-                    stock_data = self.data_fetcher.calculate_technical_indicators(stock_data)
-                
-                # Fetch news data
-                news_data = self.data_fetcher.get_news_data(symbol)
-                
-                # Store in session state
-                st.session_state.stock_data = stock_data
-                st.session_state.news_data = news_data
-                st.session_state.current_symbol = symbol
+        st.warning("""
+        **Troubleshooting Steps:**
+        1. Wait 1-2 minutes for API rate limits to reset
+        2. Try a different stock symbol
+        3. Click 'Clear Cache & Restart' in sidebar
+        4. Use shorter data periods (1mo instead of 1y)
+        """)
         
-        stock_data = st.session_state.stock_data
-        news_data = st.session_state.news_data
+        # Show detailed error in expander for debugging
+        with st.expander("Technical Details (for debugging)"):
+            st.code(traceback.format_exc())
+    
+    def analyze_stock(self, symbol, period, use_technical_indicators, use_sentiment_analysis, use_ml_prediction):
+        """Main analysis function with error handling"""
         
-        # Display basic stock info
+        try:
+            # Validate symbol
+            if not symbol or len(symbol) < 1:
+                st.error("Please enter a valid stock symbol")
+                return
+            
+            # Initialize session state for data
+            cache_key = f"{symbol}_{period}"
+            if 'stock_data' not in st.session_state or st.session_state.get('current_cache_key') != cache_key:
+                with st.spinner(f"📊 Fetching data for {symbol}..."):
+                    # Fetch stock data
+                    stock_data = self.data_fetcher.get_stock_data(symbol, period)
+                    
+                    if stock_data is None or stock_data.empty:
+                        st.error(f"❌ No data found for {symbol}. Try: TSLA, GOOGL, RELIANCE.NS")
+                        return
+                    
+                    # Fetch news data
+                    news_data = self.data_fetcher.get_news_data(symbol)
+                    
+                    # Store in session state
+                    st.session_state.stock_data = stock_data
+                    st.session_state.news_data = news_data
+                    st.session_state.current_cache_key = cache_key
+                    st.session_state.current_symbol = symbol
+            
+            stock_data = st.session_state.stock_data
+            news_data = st.session_state.news_data
+            
+            # Display basic stock info
+            self.display_stock_info(stock_data, symbol)
+            
+            # Stock price chart
+            st.subheader("Stock Price Chart")
+            price_chart = self.visualizer.plot_stock_price(stock_data, f"{symbol} Stock Price")
+            st.plotly_chart(price_chart, use_container_width=True)
+            
+            # Technical indicators
+            if use_technical_indicators:
+                st.subheader("Technical Indicators")
+                try:
+                    tech_fig = self.visualizer.plot_technical_indicators(stock_data)
+                    st.pyplot(tech_fig)
+                except Exception as e:
+                    st.warning(f"Technical indicators unavailable: {e}")
+            
+            # Sentiment Analysis
+            sentiment_score = 0.0
+            if use_sentiment_analysis:
+                st.subheader("Market Sentiment Analysis")
+                try:
+                    with st.spinner("Analyzing news sentiment..."):
+                        sentiment_score = self.sentiment_analyzer.analyze_news_sentiment(news_data)
+                    
+                    # Display sentiment gauge
+                    sentiment_chart = self.visualizer.plot_sentiment_analysis(sentiment_score, news_data)
+                    st.plotly_chart(sentiment_chart, use_container_width=True)
+                    
+                    # Show news articles
+                    self.display_news_articles(news_data)
+                    
+                except Exception as e:
+                    st.warning(f"Sentiment analysis unavailable: {e}")
+            
+            # Machine Learning Prediction
+            if use_ml_prediction:
+                st.subheader("AI Prediction & Recommendation")
+                try:
+                    self.generate_prediction(stock_data, sentiment_score, symbol)
+                except Exception as e:
+                    st.warning(f"Prediction unavailable: {e}")
+            
+            # Risk Disclaimer
+            st.markdown("---")
+            st.warning("""
+            **Disclaimer:** This is for educational and research purposes only. 
+            Stock market predictions are inherently uncertain and past performance 
+            does not guarantee future results. Always conduct your own research 
+            and consult with financial advisors before making investment decisions.
+            """)
+            
+        except Exception as e:
+            self.handle_error(e)
+    
+    def display_stock_info(self, stock_data, symbol):
+        """Display basic stock information"""
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
@@ -135,135 +247,157 @@ class NextTickApp:
             st.metric("Current Price", f"${current_price:.2f}")
         
         with col2:
-            price_change = stock_data['Close'].iloc[-1] - stock_data['Close'].iloc[-2]
-            change_percent = (price_change / stock_data['Close'].iloc[-2]) * 100
-            st.metric("Daily Change", f"${price_change:.2f}", f"{change_percent:.2f}%")
+            if len(stock_data) > 1:
+                price_change = stock_data['Close'].iloc[-1] - stock_data['Close'].iloc[-2]
+                change_percent = (price_change / stock_data['Close'].iloc[-2]) * 100
+                st.metric("Daily Change", f"${price_change:.2f}", f"{change_percent:.2f}%")
+            else:
+                st.metric("Daily Change", "N/A")
         
         with col3:
             volume = stock_data['Volume'].iloc[-1]
             st.metric("Volume", f"{volume:,}")
         
         with col4:
-            if 'rsi' in stock_data.columns:
+            if 'rsi' in stock_data.columns and not pd.isna(stock_data['rsi'].iloc[-1]):
                 rsi = stock_data['rsi'].iloc[-1]
                 st.metric("RSI", f"{rsi:.2f}")
-        
-        # Stock price chart
-        st.subheader("Stock Price Chart")
-        price_chart = self.visualizer.plot_stock_price(stock_data, f"{symbol} Stock Price")
-        st.plotly_chart(price_chart, use_container_width=True)
-        
-        # Technical indicators
-        if use_technical_indicators:
-            st.subheader("Technical Indicators")
-            tech_fig = self.visualizer.plot_technical_indicators(stock_data)
-            st.pyplot(tech_fig)
-        
-        # Sentiment Analysis
-        sentiment_score = 0.0
-        if use_sentiment_analysis and not news_data.empty:
-            st.subheader("Market Sentiment Analysis")
-            
-            with st.spinner("Analyzing news sentiment..."):
-                sentiment_score = self.sentiment_analyzer.analyze_news_sentiment(news_data)
-            
-            # Display sentiment gauge
-            sentiment_chart = self.visualizer.plot_sentiment_analysis(sentiment_score, news_data)
-            st.plotly_chart(sentiment_chart, use_container_width=True)
-            
-            # Show news articles
-            st.subheader("Recent News Articles")
+            else:
+                st.metric("RSI", "N/A")
+    
+    def display_news_articles(self, news_data):
+        """Display news articles"""
+        st.subheader("Recent News Articles")
+        if not news_data.empty:
             for idx, article in news_data.head(5).iterrows():
                 with st.expander(f"{article['title']} - {article['source']}"):
                     st.write(f"**Published:** {article['published_at']}")
                     st.write(f"**Description:** {article.get('description', 'No description available')}")
-        
-        # Machine Learning Prediction
-        st.subheader("AI Prediction & Recommendation")
-        
+        else:
+            st.info("No recent news articles available.")
+    
+    def generate_prediction(self, stock_data, sentiment_score, symbol):
+        """Generate stock prediction with error handling"""
         with st.spinner("Training model and making prediction..."):
-            # Train model
+            # Use simpler features for reliability
             feature_columns = ['Close', 'Volume']
-            if use_technical_indicators:
-                feature_columns.extend(['rsi', 'macd'])
+            if 'rsi' in stock_data.columns:
+                feature_columns.append('rsi')
+            if 'macd' in stock_data.columns:
+                feature_columns.append('macd')
             
-            # Filter out rows with NaN values in feature columns
+            # Filter out rows with NaN values
             train_data = stock_data[feature_columns].dropna()
             
             if len(train_data) > 10:
-                success = self.stock_predictor.train_linear_regression(train_data, feature_columns)
-                
-                if success:
-                    # Make prediction
-                    predicted_price, current_price = self.stock_predictor.predict_next_day(
-                        train_data, feature_columns
-                    )
+                try:
+                    success = self.stock_predictor.train_linear_regression(train_data, feature_columns)
                     
-                    if predicted_price is not None:
-                        # Generate recommendation
-                        price_change_pred = ((predicted_price - current_price) / current_price) * 100
+                    if success:
+                        predicted_price, current_price = self.stock_predictor.predict_next_day(train_data, feature_columns)
                         
-                        # Determine recommendation
-                        if price_change_pred > 1.0 and sentiment_score > 0.1:
-                            recommendation = "BUY"
-                            recommendation_class = "buy-recommendation"
-                            recommendation_color = "green"
-                        elif price_change_pred < -1.0 or sentiment_score < -0.1:
-                            recommendation = "SELL"
-                            recommendation_class = "sell-recommendation"
-                            recommendation_color = "red"
+                        if predicted_price is not None:
+                            self.display_prediction_results(predicted_price, current_price, sentiment_score)
                         else:
-                            recommendation = "HOLD"
-                            recommendation_class = "hold-recommendation"
-                            recommendation_color = "orange"
+                            st.warning("Prediction unavailable. Try with more data.")
+                    else:
+                        st.warning("Model training failed. Using simplified analysis.")
+                        self.display_simplified_analysis(stock_data, sentiment_score)
                         
-                        # Display prediction results
-                        col1, col2, col3 = st.columns(3)
-                        
-                        with col1:
-                            st.metric("Current Price", f"${current_price:.2f}")
-                        
-                        with col2:
-                            st.metric("Predicted Price", f"${predicted_price:.2f}", 
-                                     f"{price_change_pred:+.2f}%")
-                        
-                        with col3:
-                            st.metric("Sentiment Score", f"{sentiment_score:.3f}")
-                        
-                        # Recommendation card
-                        st.markdown(
-                            f"""
-                            <div class="prediction-card {recommendation_class}">
-                                <h3 style="color: {recommendation_color}; margin: 0;">Recommendation: {recommendation}</h3>
-                                <p style="margin: 0.5rem 0 0 0;">
-                                    Based on price prediction and market sentiment analysis.
-                                </p>
-                            </div>
-                            """, 
-                            unsafe_allow_html=True
-                        )
-                        
-                        # Prediction explanation
-                        st.info(f"""
-                        **Analysis Summary:**
-                        - **Price Prediction:** {price_change_pred:+.2f}% expected change
-                        - **Market Sentiment:** {'Positive' if sentiment_score > 0.1 else 'Negative' if sentiment_score < -0.1 else 'Neutral'}
-                        - **Confidence:** Based on technical analysis and news sentiment
-                        """)
-            
+                except Exception as e:
+                    st.warning(f"Prediction model error: {e}")
+                    self.display_simplified_analysis(stock_data, sentiment_score)
             else:
                 st.warning("Insufficient data for accurate prediction. Please select a longer time period.")
+    
+    def display_prediction_results(self, predicted_price, current_price, sentiment_score):
+        """Display prediction results"""
+        price_change_pred = ((predicted_price - current_price) / current_price) * 100
         
-        # Risk Disclaimer
-        st.markdown("---")
-        st.warning("""
-        **Disclaimer:** This is for educational and research purposes only. 
-        Stock market predictions are inherently uncertain and past performance 
-        does not guarantee future results. Always conduct your own research 
-        and consult with financial advisors before making investment decisions.
+        # Determine recommendation
+        if price_change_pred > 1.0 and sentiment_score > 0.1:
+            recommendation = "BUY"
+            recommendation_class = "buy-recommendation"
+            recommendation_color = "green"
+        elif price_change_pred < -1.0 or sentiment_score < -0.1:
+            recommendation = "SELL"
+            recommendation_class = "sell-recommendation"
+            recommendation_color = "red"
+        else:
+            recommendation = "HOLD"
+            recommendation_class = "hold-recommendation"
+            recommendation_color = "orange"
+        
+        # Display prediction results
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Current Price", f"${current_price:.2f}")
+        
+        with col2:
+            st.metric("Predicted Price", f"${predicted_price:.2f}", f"{price_change_pred:+.2f}%")
+        
+        with col3:
+            st.metric("Sentiment Score", f"{sentiment_score:.3f}")
+        
+        # Recommendation card
+        st.markdown(
+            f"""
+            <div class="prediction-card {recommendation_class}">
+                <h3 style="color: {recommendation_color}; margin: 0;">Recommendation: {recommendation}</h3>
+                <p style="margin: 0.5rem 0 0 0;">
+                    Based on price prediction and market sentiment analysis.
+                </p>
+            </div>
+            """, 
+            unsafe_allow_html=True
+        )
+        
+        # Prediction explanation
+        st.info(f"""
+        **Analysis Summary:**
+        - **Price Prediction:** {price_change_pred:+.2f}% expected change
+        - **Market Sentiment:** {'Positive' if sentiment_score > 0.1 else 'Negative' if sentiment_score < -0.1 else 'Neutral'}
+        - **Confidence:** Based on technical analysis and news sentiment
         """)
+    
+    def display_simplified_analysis(self, stock_data, sentiment_score):
+        """Display simplified analysis when ML prediction fails"""
+        current_price = stock_data['Close'].iloc[-1]
+        
+        # Simple trend analysis
+        if len(stock_data) > 5:
+            recent_trend = stock_data['Close'].iloc[-5:].pct_change().mean() * 100
+        else:
+            recent_trend = 0
+        
+        if recent_trend > 0.5 and sentiment_score > 0:
+            recommendation = "BUY"
+            reason = "Positive trend and sentiment"
+        elif recent_trend < -0.5 or sentiment_score < -0.1:
+            recommendation = "SELL" 
+            reason = "Negative trend or sentiment"
+        else:
+            recommendation = "HOLD"
+            reason = "Neutral market conditions"
+        
+        st.warning("Using simplified analysis (ML model unavailable)")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Current Price", f"${current_price:.2f}")
+        with col2:
+            st.metric("Recent Trend", f"{recent_trend:+.2f}%")
+        with col3:
+            st.metric("Sentiment", f"{sentiment_score:.3f}")
+        
+        st.success(f"**Recommendation: {recommendation}** - {reason}")
 
 # Run the application
 if __name__ == "__main__":
-    app = NextTickApp()
-    app.run()
+    try:
+        app = NextTickApp()
+        app.run()
+    except Exception as e:
+        st.error(f"Failed to start application: {e}")
+        st.info("Please refresh the page and try again.")
