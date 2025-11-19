@@ -7,6 +7,8 @@ import os
 from dotenv import load_dotenv
 import gc
 import warnings
+import psutil
+import sys
 warnings.filterwarnings('ignore')
 
 # Import optimized modules
@@ -37,85 +39,151 @@ class MemoryOptimizedNextTickApp:
     def _initialize_components(self):
         """Initialize components with memory optimization"""
         try:
-            self.data_fetcher = DataFetcher()
-            self.sentiment_analyzer = OptimizedSentimentAnalyzer()
-            self.stock_predictor = StockPredictor()
-            self.visualizer = StockVisualizer()
+            # Initialize components only when needed
+            if not hasattr(self, 'data_fetcher') or self.data_fetcher is None:
+                self.data_fetcher = DataFetcher()
+            
+            if not hasattr(self, 'sentiment_analyzer') or self.sentiment_analyzer is None:
+                self.sentiment_analyzer = OptimizedSentimentAnalyzer()
+            
+            if not hasattr(self, 'stock_predictor') or self.stock_predictor is None:
+                self.stock_predictor = StockPredictor()
+            
+            if not hasattr(self, 'visualizer') or self.visualizer is None:
+                self.visualizer = StockVisualizer()
+                
         except Exception as e:
             st.error(f"Error initializing app: {e}")
     
+    def _get_memory_usage(self):
+        """Get current memory usage"""
+        try:
+            process = psutil.Process(os.getpid())
+            return process.memory_info().rss / 1024 / 1024  # MB
+        except:
+            return 0
+    
+    def _check_memory_threshold(self):
+        """Check if memory usage is too high"""
+        current_memory = self._get_memory_usage()
+        if current_memory > 500:  # 500MB threshold
+            st.warning(f"🔄 High memory usage detected ({current_memory:.1f}MB). Clearing cache...")
+            self._force_memory_cleanup()
+            return True
+        return False
+    
+    def _force_memory_cleanup(self):
+        """Forceful memory cleanup"""
+        try:
+            # Clear sentiment analyzer first (biggest memory user)
+            if self.sentiment_analyzer:
+                self.sentiment_analyzer.cleanup()
+            
+            # Clear large datasets from session state
+            large_keys = ['stock_data', 'news_data', 'technical_data', 'model_data']
+            for key in large_keys:
+                if key in st.session_state:
+                    del st.session_state[key]
+            
+            # Clear components
+            self.stock_predictor = None
+            self.visualizer = None
+            
+            # Force garbage collection
+            gc.collect()
+            
+            # Reinitialize essential components
+            self._initialize_components()
+            
+            st.success("🧹 Memory cleanup completed!")
+            
+        except Exception as e:
+            st.warning(f"Memory cleanup warning: {e}")
+    
     def _smart_memory_management(self):
-        """Smart memory management that doesn't affect accuracy"""
+        """Smart memory management with proactive cleanup"""
         if 'analysis_count' not in st.session_state:
             st.session_state.analysis_count = 0
             st.session_state.last_memory_clear = datetime.now()
+            st.session_state.initial_memory = self._get_memory_usage()
         
         st.session_state.analysis_count += 1
         
-        # Clear memory only after 4 analyses or 5 minutes (increased from 3)
+        # Check memory threshold first
+        if self._check_memory_threshold():
+            return
+        
+        # Clear memory every 3 analyses or 3 minutes (more aggressive)
         current_time = datetime.now()
         time_since_clear = (current_time - st.session_state.last_memory_clear).total_seconds()
         
-        if st.session_state.analysis_count >= 4 or time_since_clear > 300:  # 5 minutes
+        if st.session_state.analysis_count >= 3 or time_since_clear > 180:  # 3 minutes
             st.session_state.analysis_count = 0
             st.session_state.last_memory_clear = current_time
             self._clear_memory_cache()
     
     def _clear_memory_cache(self):
         """Enhanced memory clearing without losing accuracy"""
-        import gc
         try:
             # Clear sentiment analyzer memory
             if self.sentiment_analyzer:
                 self.sentiment_analyzer.cleanup()
             
-            # Clear large data objects but keep current analysis
-            current_data = {}
-            if 'stock_data' in st.session_state:
-                current_data['stock_data'] = st.session_state.stock_data
-            if 'news_data' in st.session_state:
-                current_data['news_data'] = st.session_state.news_data
-            if 'current_cache_key' in st.session_state:
-                current_data['current_cache_key'] = st.session_state.current_cache_key
-            if 'current_symbol' in st.session_state:
-                current_data['current_symbol'] = st.session_state.current_symbol
+            # Keep only essential session state
+            essential_data = {}
+            essential_keys = ['current_cache_key', 'current_symbol', 'analysis_count', 'last_memory_clear']
+            
+            for key in essential_keys:
+                if key in st.session_state:
+                    essential_data[key] = st.session_state[key]
             
             # Clear all session state
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             
-            # Restore current analysis data
-            for key, value in current_data.items():
+            # Restore essential data only
+            for key, value in essential_data.items():
                 st.session_state[key] = value
             
             # Force garbage collection
             gc.collect()
             
-            st.success("🔄 Memory optimized! Model accuracy maintained.")
+            # Show memory usage info
+            current_memory = self._get_memory_usage()
+            if 'initial_memory' in st.session_state:
+                memory_saved = st.session_state.initial_memory - current_memory
+                if memory_saved > 0:
+                    st.sidebar.success(f"Memory optimized! Saved {memory_saved:.1f}MB")
             
         except Exception as e:
             st.warning(f"Memory optimization note: {e}")
     
     def run(self):
-        # Header
+        # Header with minimal styling
         st.markdown("""
         <style>
         .main-header {
             font-size: 2.5rem;
             color: #1f77b4;
             text-align: center;
-            margin-bottom: 2rem;
+            margin-bottom: 1rem;
         }
-        .metric-card {
-            background-color: #f0f2f6;
-            padding: 1rem;
-            border-radius: 10px;
-            border-left: 4px solid #1f77b4;
+        .memory-info {
+            font-size: 0.8rem;
+            color: #666;
+            text-align: center;
         }
         </style>
         """, unsafe_allow_html=True)
         
         st.markdown('<h1 class="main-header">📈 NextTick AI Stock Prediction</h1>', unsafe_allow_html=True)
+        
+        # Show memory info
+        try:
+            current_memory = self._get_memory_usage()
+            st.markdown(f'<p class="memory-info">Memory usage: {current_memory:.1f}MB</p>', unsafe_allow_html=True)
+        except:
+            pass
         
         # Sidebar
         st.sidebar.title("Configuration")
@@ -123,58 +191,78 @@ class MemoryOptimizedNextTickApp:
         # Stock symbol input
         symbol = st.sidebar.text_input("Enter Stock Symbol", "TSLA").upper()
         
-        # Analysis period
-        period = st.sidebar.selectbox("Data Period", ["1mo", "3mo", "6mo", "1y"], index=1)
+        # Analysis period with memory considerations
+        period = st.sidebar.selectbox("Data Period", ["1mo", "3mo", "6mo"], index=1)
         
-        # Feature selection
+        # Feature selection with memory warnings
         st.sidebar.subheader("Model Features")
         use_technical_indicators = st.sidebar.checkbox("Use Technical Indicators", True)
         use_sentiment_analysis = st.sidebar.checkbox("Use Sentiment Analysis", True)
         use_advanced_model = st.sidebar.checkbox("Use Enhanced Prediction Model", True)
         
+        if use_sentiment_analysis:
+            st.sidebar.caption("⚠️ Sentiment analysis uses significant memory")
+        
         # Memory management
         st.sidebar.subheader("Memory Management")
-        if st.sidebar.button("🔄 Clear Memory Cache"):
-            self._clear_memory_cache()
-            st.rerun()
+        
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            if st.button("🔄 Clear Cache"):
+                self._clear_memory_cache()
+                st.rerun()
+        
+        with col2:
+            if st.button("🧹 Force Cleanup"):
+                self._force_memory_cleanup()
+                st.rerun()
         
         # Display memory info
         if 'analysis_count' in st.session_state:
-            st.sidebar.info(f"Analyses since last clear: {st.session_state.analysis_count}/4")
+            st.sidebar.info(f"Analyses since clear: {st.session_state.analysis_count}/3")
+        
+        # Performance mode
+        performance_mode = st.sidebar.checkbox("Performance Mode", False, 
+                                             help="Reduces features for better memory usage")
+        
+        if performance_mode:
+            use_technical_indicators = False
+            use_sentiment_analysis = False
+            st.sidebar.info("Performance mode: Basic features only")
         
         # Main content
         if st.sidebar.button("Analyze Stock") or symbol:
             try:
-                self.analyze_stock(symbol, period, use_technical_indicators, use_sentiment_analysis, use_advanced_model)
+                self.analyze_stock(symbol, period, use_technical_indicators, use_sentiment_analysis, use_advanced_model, performance_mode)
             except Exception as e:
                 self._handle_error(e)
         
         # About section
         st.sidebar.markdown("---")
         st.sidebar.info("""
-        **Enhanced Accuracy Features:**
-        - Advanced sentiment analysis (4 articles)
-        - Enhanced feature engineering
-        - Confidence-based predictions
-        - Smart memory management
+        **Memory Optimized Version**
+        - Proactive memory management
+        - Lazy loading of heavy models
+        - Automatic cleanup every 3 analyses
+        - Memory usage monitoring
         """)
     
     def _handle_error(self, error):
         """Handle errors with memory cleanup"""
         st.error(f"Application error: {str(error)}")
-        st.info("💡 Try clearing the memory cache or using a shorter data period.")
+        st.info("💡 Try clearing memory cache or using Performance Mode")
         
         # Force cleanup on error
-        self._clear_memory_cache()
+        self._force_memory_cleanup()
     
-    def analyze_stock(self, symbol, period, use_technical_indicators, use_sentiment_analysis, use_advanced_model):
-        """Optimized stock analysis with smart memory management"""
+    def analyze_stock(self, symbol, period, use_technical_indicators, use_sentiment_analysis, use_advanced_model, performance_mode):
+        """Memory-optimized stock analysis"""
         try:
             # Use smart memory management
             self._smart_memory_management()
             
             # Initialize session state for data
-            cache_key = f"{symbol}_{period}"
+            cache_key = f"{symbol}_{period}_{performance_mode}"
             if 'stock_data' not in st.session_state or st.session_state.get('current_cache_key') != cache_key:
                 with st.spinner(f"📊 Fetching data for {symbol}..."):
                     # Clear previous data first
@@ -190,8 +278,10 @@ class MemoryOptimizedNextTickApp:
                         st.error(f"❌ No data found for {symbol}")
                         return
                     
-                    # Fetch news data
-                    news_data = self.data_fetcher.get_news_data(symbol)
+                    # Only fetch news if sentiment analysis is enabled
+                    news_data = pd.DataFrame()
+                    if use_sentiment_analysis and not performance_mode:
+                        news_data = self.data_fetcher.get_news_data(symbol)
                     
                     # Store in session state
                     st.session_state.stock_data = stock_data
@@ -202,7 +292,7 @@ class MemoryOptimizedNextTickApp:
             stock_data = st.session_state.stock_data
             news_data = st.session_state.news_data
             
-            # Display basic stock info
+            # Display basic stock info (lightweight)
             self._display_stock_info(stock_data, symbol)
             
             # Stock price chart
@@ -210,21 +300,22 @@ class MemoryOptimizedNextTickApp:
             price_chart = self.visualizer.plot_stock_price(stock_data, f"{symbol} Stock Price")
             st.plotly_chart(price_chart, use_container_width=True)
             
-            # Technical indicators
-            if use_technical_indicators:
+            # Technical indicators (optional, memory intensive)
+            if use_technical_indicators and not performance_mode:
                 st.subheader("🔧 Technical Indicators")
                 try:
                     tech_fig = self.visualizer.plot_technical_indicators(stock_data)
                     st.pyplot(tech_fig)
+                    plt.close('all')  # Important: close matplotlib figures
                 except Exception as e:
                     st.warning(f"Technical indicators unavailable: {e}")
             
-            # Sentiment Analysis (with memory optimization)
+            # Sentiment Analysis (memory intensive)
             sentiment_score = 0.0
-            if use_sentiment_analysis:
+            if use_sentiment_analysis and not performance_mode:
                 st.subheader("😊 Market Sentiment Analysis")
                 try:
-                    with st.spinner("🤖 Analyzing news sentiment with enhanced model..."):
+                    with st.spinner("🤖 Analyzing news sentiment..."):
                         sentiment_score = self.sentiment_analyzer.analyze_news_sentiment(news_data)
                     
                     # Display sentiment gauge
@@ -234,7 +325,7 @@ class MemoryOptimizedNextTickApp:
                     # Show sentiment interpretation
                     self._display_sentiment_interpretation(sentiment_score)
                     
-                    # Show news articles
+                    # Show limited news articles
                     self._display_news_articles(news_data)
                     
                 except Exception as e:
@@ -243,30 +334,31 @@ class MemoryOptimizedNextTickApp:
             # Machine Learning Prediction
             st.subheader("🤖 AI Prediction & Recommendation")
             try:
-                if use_advanced_model:
-                    self._generate_enhanced_prediction(stock_data, sentiment_score, symbol)
+                # Use basic prediction in performance mode
+                if performance_mode:
+                    self._generate_basic_prediction(stock_data, sentiment_score, symbol)
                 else:
-                    self._generate_prediction(stock_data, sentiment_score, symbol)
+                    if use_advanced_model:
+                        self._generate_enhanced_prediction(stock_data, sentiment_score, symbol)
+                    else:
+                        self._generate_prediction(stock_data, sentiment_score, symbol)
             except Exception as e:
                 st.warning(f"Prediction unavailable: {e}")
             
             # Risk Disclaimer
             st.markdown("---")
             st.warning("""
-            **Disclaimer:** This tool is for educational and research purposes only. 
-            Stock predictions are based on AI models and historical data, which may not accurately predict future performance. 
-            Always conduct your own research and consult with financial advisors before making investment decisions.
-            Past performance is not indicative of future results.
+            **Disclaimer:** Educational purposes only. Always conduct your own research.
             """)
             
         except Exception as e:
             self._handle_error(e)
     
     def _display_stock_info(self, stock_data, symbol):
-        """Display enhanced stock information"""
+        """Display lightweight stock information"""
         st.subheader(f"📈 {symbol} Stock Overview")
         
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             current_price = stock_data['Close'].iloc[-1]
@@ -283,94 +375,61 @@ class MemoryOptimizedNextTickApp:
             st.metric("Volume", f"{volume:,.0f}")
         
         with col4:
-            if 'rsi' in stock_data.columns and not pd.isna(stock_data['rsi'].iloc[-1]):
-                rsi = stock_data['rsi'].iloc[-1]
-                rsi_color = "red" if rsi > 70 else "green" if rsi < 30 else "orange"
-                st.metric("RSI", f"{rsi:.1f}", delta_color="off")
-        
-        with col5:
-            # Price range for the period
-            price_range = (stock_data['High'].max() - stock_data['Low'].min()) / stock_data['Close'].mean() * 100
-            st.metric("Volatility", f"{price_range:.1f}%")
+            if len(stock_data) > 20 and 'sma_20' in stock_data.columns:
+                sma_20 = stock_data['sma_20'].iloc[-1]
+                price_ratio = (stock_data['Close'].iloc[-1] / sma_20 - 1) * 100
+                st.metric("vs SMA20", f"{price_ratio:+.1f}%")
     
     def _display_sentiment_interpretation(self, sentiment_score):
-        """Display sentiment interpretation"""
+        """Display lightweight sentiment interpretation"""
         if sentiment_score > 0.3:
             interpretation = "Strongly Bullish"
             color = "green"
-            emoji = "🚀"
         elif sentiment_score > 0.1:
-            interpretation = "Moderately Bullish" 
+            interpretation = "Bullish" 
             color = "lightgreen"
-            emoji = "📈"
         elif sentiment_score > -0.1:
             interpretation = "Neutral"
             color = "gray"
-            emoji = "➡️"
         elif sentiment_score > -0.3:
-            interpretation = "Moderately Bearish"
+            interpretation = "Bearish"
             color = "orange"
-            emoji = "📉"
         else:
             interpretation = "Strongly Bearish"
             color = "red"
-            emoji = "🔻"
         
-        st.markdown(f"""
-        <div style='background-color: #f8f9fa; padding: 1rem; border-radius: 8px; border-left: 4px solid {color}; margin: 1rem 0;'>
-            <h4 style='color: {color}; margin: 0;'>{emoji} Sentiment: {interpretation}</h4>
-            <p style='margin: 0.5rem 0 0 0; color: #666;'>Score: {sentiment_score:.3f}</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.info(f"**Sentiment:** {interpretation} (Score: {sentiment_score:.3f})")
     
     def _display_news_articles(self, news_data):
-        """Display news articles"""
-        st.subheader("📰 Recent News Articles")
+        """Display limited news articles"""
+        st.subheader("📰 Recent News")
         if not news_data.empty:
-            for idx, article in news_data.head(4).iterrows():  # Show 4 articles for better context
-                with st.expander(f"{article['title']} - {article['source']}"):
-                    # Format published date
-                    try:
-                        pub_date = pd.to_datetime(article['published_at']).strftime("%Y-%m-%d %H:%M")
-                    except:
-                        pub_date = str(article['published_at'])
-                    
-                    st.write(f"**Published:** {pub_date}")
-                    st.write(f"**Description:** {article.get('description', 'No description available')}")
-                    
-                    # Add sentiment for this article
-                    try:
-                        article_text = f"{article['title']}. {article.get('description', '')}"
-                        article_sentiment = self.sentiment_analyzer.analyze_with_textblob(article_text)
-                        sentiment_emoji = "😊" if article_sentiment > 0.1 else "😐" if article_sentiment > -0.1 else "😞"
-                        st.write(f"**Article Sentiment:** {sentiment_emoji} ({article_sentiment:.3f})")
-                    except:
-                        pass
+            # Show only 2 articles to save memory
+            for idx, article in news_data.head(2).iterrows():
+                with st.expander(f"{article['title'][:80]}..."):
+                    st.write(f"**Source:** {article['source']}")
+                    st.write(f"**Summary:** {article.get('description', 'No description')[:200]}...")
         else:
-            st.info("No recent news articles available.")
+            st.info("No recent news available.")
     
     def _generate_enhanced_prediction(self, stock_data, sentiment_score, symbol):
-        """Enhanced stock prediction with better accuracy"""
-        with st.spinner("🧠 Training enhanced model and making prediction..."):
-            # Use enhanced feature set
+        """Enhanced prediction with memory optimization"""
+        with st.spinner("🧠 Training enhanced model..."):
+            # Use optimized feature set
             feature_columns = ['Close', 'Volume']
             if 'rsi' in stock_data.columns:
                 feature_columns.append('rsi')
             if 'macd' in stock_data.columns:
                 feature_columns.append('macd')
-            if 'sma_20' in stock_data.columns:
-                feature_columns.append('sma_20')
             
-            # Filter out rows with NaN values
+            # Filter data efficiently
             train_data = stock_data[feature_columns].dropna()
             
-            if len(train_data) > 15:  # Increased minimum data requirement
+            if len(train_data) > 15:
                 try:
-                    # Use enhanced model training
                     success = self.stock_predictor.train_enhanced_model(train_data, feature_columns)
                     
                     if success:
-                        # Get prediction with confidence
                         predicted_price, current_price, confidence = self.stock_predictor.predict_next_day(train_data, feature_columns)
                         
                         if predicted_price is not None:
@@ -381,7 +440,9 @@ class MemoryOptimizedNextTickApp:
                             # Show model metrics
                             self._display_model_metrics(train_data, feature_columns)
                     else:
-                        st.warning("Model training failed. Try with more data.")
+                        st.warning("Enhanced model training failed. Try with more data.")
+                        # Fallback to basic prediction
+                        self._generate_prediction(stock_data, sentiment_score, symbol)
                         
                 except Exception as e:
                     st.warning(f"Enhanced prediction model error: {e}")
@@ -394,7 +455,7 @@ class MemoryOptimizedNextTickApp:
     
     def _generate_prediction(self, stock_data, sentiment_score, symbol):
         """Basic stock prediction (fallback method)"""
-        with st.spinner("🧠 Training model and making prediction..."):
+        with st.spinner("🧠 Training model..."):
             # Use simpler features for reliability
             feature_columns = ['Close', 'Volume']
             if 'rsi' in stock_data.columns:
@@ -420,89 +481,145 @@ class MemoryOptimizedNextTickApp:
             else:
                 st.warning("Insufficient data for accurate prediction.")
     
+    def _generate_basic_prediction(self, stock_data, sentiment_score, symbol):
+        """Basic prediction for performance mode"""
+        with st.spinner("🧠 Calculating prediction..."):
+            # Simple price-based prediction
+            current_price = stock_data['Close'].iloc[-1]
+            
+            # Simple moving average prediction
+            if len(stock_data) > 5:
+                short_ma = stock_data['Close'].tail(5).mean()
+                trend = "up" if current_price > short_ma else "down"
+                
+                # Simple prediction based on recent trend
+                if trend == "up":
+                    predicted_price = current_price * 1.01  # +1%
+                else:
+                    predicted_price = current_price * 0.99  # -1%
+                
+                self._display_basic_prediction_results(predicted_price, current_price, sentiment_score, trend)
+            else:
+                st.warning("Insufficient data for basic prediction.")
+    
     def _display_enhanced_prediction_results(self, predicted_price, current_price, sentiment_score, confidence, symbol):
-        """Display enhanced prediction results with confidence"""
+        """Fixed recommendation system with accurate buy/sell logic"""
         price_change_pred = ((predicted_price - current_price) / current_price) * 100
         
-        # Enhanced recommendation algorithm with improved logic
-        sentiment_weight = 0.4  # Increased sentiment weight
-        price_weight = 0.6     # Reduced price weight
+        # Improved recommendation algorithm with proper risk assessment
+        price_trend_strength = abs(price_change_pred)
+        sentiment_strength = abs(sentiment_score)
         
-        # Combined score - improved calculation
+        # Define clear thresholds
+        STRONG_PRICE_THRESHOLD = 2.0    # 2% price movement is significant
+        MODERATE_PRICE_THRESHOLD = 1.0  # 1% price movement is moderate
+        STRONG_SENTIMENT_THRESHOLD = 0.3
+        MODERATE_SENTIMENT_THRESHOLD = 0.15
+        
+        # Calculate signal strength and direction
+        price_signal = 1 if price_change_pred > 0 else -1
+        sentiment_signal = 1 if sentiment_score > 0 else -1
+        
+        # Weight factors (price prediction is more important than sentiment)
+        price_weight = 0.7
+        sentiment_weight = 0.3
+        
+        # Calculate weighted score
         price_component = price_change_pred * price_weight
-        sentiment_component = sentiment_score * 50 * sentiment_weight  # Scale sentiment appropriately
-        
+        sentiment_component = sentiment_score * 100 * sentiment_weight
         combined_score = price_component + sentiment_component
         
-        # Enhanced recommendation logic
-        if price_change_pred > 0 and sentiment_score > 0:
-            # Bullish scenario: price up + positive sentiment
-            if price_change_pred > 2.0 and sentiment_score > 0.2:
-                recommendation = "STRONG BUY"
-                recommendation_color = "green"
-                recommendation_emoji = "🚀"
-            elif price_change_pred > 0.5 and sentiment_score > 0.05:
-                recommendation = "BUY"
-                recommendation_color = "lightgreen"
-                recommendation_emoji = "📈"
+        # CONFIDENCE-BASED RECOMMENDATION LOGIC
+        
+        # Case 1: Strong agreement between price and sentiment
+        if price_signal == sentiment_signal:
+            if price_trend_strength > STRONG_PRICE_THRESHOLD and sentiment_strength > STRONG_SENTIMENT_THRESHOLD:
+                # Strong bullish or bearish consensus
+                if price_signal > 0:
+                    recommendation = "STRONG BUY"
+                    recommendation_color = "green"
+                    recommendation_emoji = "🚀"
+                    reasoning = "Strong price growth expected with positive market sentiment"
+                else:
+                    recommendation = "STRONG SELL"
+                    recommendation_color = "red"
+                    recommendation_emoji = "🔻"
+                    reasoning = "Significant price decline expected with negative market sentiment"
+                    
+            elif price_trend_strength > MODERATE_PRICE_THRESHOLD and sentiment_strength > MODERATE_SENTIMENT_THRESHOLD:
+                # Moderate consensus
+                if price_signal > 0:
+                    recommendation = "BUY"
+                    recommendation_color = "lightgreen"
+                    recommendation_emoji = "📈"
+                    reasoning = "Moderate price growth expected with favorable sentiment"
+                else:
+                    recommendation = "SELL"
+                    recommendation_color = "orange"
+                    recommendation_emoji = "📉"
+                    reasoning = "Price decline expected with concerning market sentiment"
+                    
             else:
+                # Weak consensus - be cautious
                 recommendation = "HOLD"
-                recommendation_color = "orange"
+                recommendation_color = "gray"
                 recommendation_emoji = "⚖️"
-                
-        elif price_change_pred < 0 and sentiment_score < 0:
-            # Bearish scenario: price down + negative sentiment
-            if price_change_pred < -2.0 and sentiment_score < -0.2:
-                recommendation = "STRONG SELL"
-                recommendation_color = "red"
-                recommendation_emoji = "🔻"
-            elif price_change_pred < -0.5 and sentiment_score < -0.05:
-                recommendation = "SELL"
-                recommendation_color = "red"
-                recommendation_emoji = "📉"
-            else:
-                recommendation = "HOLD"
-                recommendation_color = "orange"
-                recommendation_emoji = "⚖️"
-                
+                reasoning = "Weak signals in both price prediction and market sentiment"
+        
+        # Case 2: Mixed signals (price and sentiment disagree)
         else:
-            # Mixed signals: price and sentiment going opposite directions
-            if abs(price_change_pred) > abs(sentiment_score * 100):
-                # Price trend dominates
-                if price_change_pred > 1.0:
+            # When signals conflict, price prediction gets priority but we're more cautious
+            if price_trend_strength > STRONG_PRICE_THRESHOLD:
+                # Strong price trend overrides sentiment
+                if price_signal > 0:
                     recommendation = "CAUTIOUS BUY"
                     recommendation_color = "lightgreen"
                     recommendation_emoji = "📈"
-                elif price_change_pred < -1.0:
+                    reasoning = "Strong price growth expected despite mixed sentiment"
+                else:
                     recommendation = "CAUTIOUS SELL"
                     recommendation_color = "orange"
                     recommendation_emoji = "📉"
-                else:
-                    recommendation = "HOLD"
-                    recommendation_color = "orange"
-                    recommendation_emoji = "⚖️"
-            else:
-                # Sentiment dominates
-                if sentiment_score > 0.1:
-                    recommendation = "SENTIMENT BUY"
-                    recommendation_color = "lightgreen"
+                    reasoning = "Significant price decline expected despite mixed sentiment"
+                    
+            elif sentiment_strength > STRONG_SENTIMENT_THRESHOLD:
+                # Very strong sentiment might override weak price signal
+                if sentiment_signal > 0:
+                    recommendation = "SENTIMENT-BIASED HOLD"
+                    recommendation_color = "lightblue"
                     recommendation_emoji = "😊"
-                elif sentiment_score < -0.1:
-                    recommendation = "SENTIMENT SELL"
-                    recommendation_color = "orange"
-                    recommendation_emoji = "😞"
+                    reasoning = "Strong positive sentiment but weak price signal - monitor closely"
                 else:
-                    recommendation = "HOLD"
-                    recommendation_color = "orange"
-                    recommendation_emoji = "⚖️"
+                    recommendation = "SENTIMENT-BIASED HOLD"
+                    recommendation_color = "lightcoral"
+                    recommendation_emoji = "😞"
+                    reasoning = "Strong negative sentiment but weak price signal - monitor closely"
+                    
+            else:
+                # Weak conflicting signals - definitely hold
+                recommendation = "HOLD"
+                recommendation_color = "gray"
+                recommendation_emoji = "⚖️"
+                reasoning = "Conflicting weak signals - wait for clearer direction"
         
-        # Override if confidence is very low
-        if confidence and confidence < 0.3:
-            recommendation = "HOLD (LOW CONFIDENCE)"
+        # ADJUST FOR CONFIDENCE LEVEL
+        if confidence and confidence < 0.6:
+            # Low confidence overrides to HOLD regardless of other signals
+            if recommendation not in ["HOLD", "SENTIMENT-BIASED HOLD"]:
+                recommendation = f"HOLD (LOW CONFIDENCE: {confidence*100:.1f}%)"
+                recommendation_color = "gray"
+                recommendation_emoji = "🤔"
+                reasoning += f" - Model confidence is low ({confidence*100:.1f}%)"
+        
+        # SPECIAL CASES that always result in HOLD
+        if (abs(price_change_pred) < 0.5 and abs(sentiment_score) < 0.1) or \
+           (abs(combined_score) < 1.0 and confidence and confidence < 0.7):
+            recommendation = "HOLD"
             recommendation_color = "gray"
-            recommendation_emoji = "🤔"
+            recommendation_emoji = "⚖️"
+            reasoning = "Insufficient signal strength for clear recommendation"
         
-        # Display enhanced results
+        # Display results
         st.subheader("🎯 Prediction Results")
         
         col1, col2, col3, col4 = st.columns(4)
@@ -515,96 +632,117 @@ class MemoryOptimizedNextTickApp:
         
         with col3:
             # Color code sentiment
-            sentiment_color = "red" if sentiment_score < -0.1 else "green" if sentiment_score > 0.1 else "orange"
-            st.metric("Sentiment Score", f"{sentiment_score:.3f}", delta_color="off")
+            sentiment_display = f"{sentiment_score:.3f}"
+            st.metric("Sentiment Score", sentiment_display)
         
         with col4:
             confidence_display = confidence * 100 if confidence else "N/A"
             if confidence:
-                confidence_color = "green" if confidence > 0.7 else "orange" if confidence > 0.5 else "red"
-                st.metric("Model Confidence", f"{confidence_display:.1f}%", delta_color="off")
+                st.metric("Model Confidence", f"{confidence_display:.1f}%")
             else:
                 st.metric("Model Confidence", "N/A")
         
-        # Enhanced recommendation with detailed reasoning
-        reasoning = []
-        
-        if price_change_pred > 0:
-            reasoning.append(f"price expected to rise (+{price_change_pred:.2f}%)")
-        elif price_change_pred < 0:
-            reasoning.append(f"price expected to fall ({price_change_pred:+.2f}%)")
-        else:
-            reasoning.append("price expected to remain stable")
-        
-        if sentiment_score > 0.1:
-            reasoning.append("positive market sentiment")
-        elif sentiment_score < -0.1:
-            reasoning.append("negative market sentiment")
-        else:
-            reasoning.append("neutral market sentiment")
-        
-        if confidence:
-            if confidence > 0.7:
-                reasoning.append("high model confidence")
-            elif confidence > 0.5:
-                reasoning.append("moderate model confidence")
-            else:
-                reasoning.append("low model confidence")
-        
-        reasoning_text = ", ".join(reasoning)
-        
+        # Display recommendation with detailed reasoning
         st.markdown(f"""
         <div style='background-color: #f8f9fa; padding: 1.5rem; border-radius: 10px; border-left: 5px solid {recommendation_color}; margin: 1rem 0;'>
             <h3 style='color: {recommendation_color}; margin: 0;'>{recommendation_emoji} Recommendation: {recommendation}</h3>
-            <p style='margin: 0.5rem 0 0 0; color: #666;'>
-                Based on analysis of: {reasoning_text}
-            </p>
+            <p style='margin: 0.5rem 0 0 0; color: #666;'><strong>Reasoning:</strong> {reasoning}</p>
             <p style='margin: 0.5rem 0 0 0; font-size: 0.9rem; color: #888;'>
-                Combined Score: {combined_score:.2f} | Price Impact: {price_change_pred:+.2f}% | Sentiment Impact: {sentiment_score:.3f}
+                Price Change: {price_change_pred:+.2f}% | Sentiment: {sentiment_score:.3f} | Combined Score: {combined_score:.2f}
             </p>
         </div>
         """, unsafe_allow_html=True)
         
-        # Add explanation for conflicting signals
-        if (price_change_pred > 0 and sentiment_score < -0.1) or (price_change_pred < 0 and sentiment_score > 0.1):
-            st.info("""
-            **Note:** Mixed signals detected. The price prediction and market sentiment are pointing in different directions. 
-            Consider waiting for clearer market conditions or conducting additional research.
-            """)
+        # Add risk assessment
+        self._display_risk_assessment(price_change_pred, sentiment_score, confidence, recommendation)
+    
+    def _display_risk_assessment(self, price_change_pred, sentiment_score, confidence, recommendation):
+        """Display risk assessment based on the signals"""
+        
+        risk_level = "MEDIUM"
+        risk_color = "orange"
+        risk_details = []
+        
+        # Calculate risk factors
+        if abs(price_change_pred) > 3.0:
+            risk_details.append("High price volatility expected")
+            risk_level = "HIGH"
+            risk_color = "red"
+        elif abs(price_change_pred) < 0.5:
+            risk_details.append("Low price movement expected")
+            risk_level = "LOW"
+            risk_color = "green"
+        
+        if abs(sentiment_score) > 0.3:
+            risk_details.append("Strong market sentiment detected")
+            if risk_level != "HIGH":
+                risk_level = "MEDIUM_HIGH"
+        elif abs(sentiment_score) < 0.1:
+            risk_details.append("Neutral market sentiment")
+            if risk_level == "MEDIUM":
+                risk_level = "LOW_MEDIUM"
+        
+        if confidence and confidence < 0.6:
+            risk_details.append("Low model confidence")
+            risk_level = "HIGH" if risk_level != "LOW" else "MEDIUM"
+            risk_color = "red"
+        
+        # Special case for HOLD recommendations
+        if recommendation.startswith("HOLD"):
+            risk_level = "LOW"
+            risk_color = "green"
+            risk_details.append("Conservative recommendation reduces risk")
+        
+        risk_details_text = " • ".join(risk_details) if risk_details else "Standard market conditions"
+        
+        st.markdown(f"""
+        <div style='background-color: #fff3cd; padding: 1rem; border-radius: 8px; border-left: 4px solid {risk_color}; margin: 1rem 0;'>
+            <h4 style='color: {risk_color}; margin: 0;'>📊 Risk Assessment: {risk_level}</h4>
+            <p style='margin: 0.5rem 0 0 0; color: #856404;'>{risk_details_text}</p>
+        </div>
+        """, unsafe_allow_html=True)
     
     def _display_prediction_results(self, predicted_price, current_price, sentiment_score):
-        """Display basic prediction results"""
+        """Display basic prediction results with improved logic"""
         price_change_pred = ((predicted_price - current_price) / current_price) * 100
         
-        # Improved basic recommendation algorithm
-        if price_change_pred > 1.0 and sentiment_score > 0.1:
+        # Improved basic recommendation logic
+        if price_change_pred > 2.0 and sentiment_score > 0.2:
             recommendation = "BUY"
             recommendation_color = "green"
-            recommendation_emoji = "📈"
-        elif price_change_pred < -1.0 and sentiment_score < -0.1:
+            reasoning = "Strong price growth with positive sentiment"
+        elif price_change_pred > 1.0 and sentiment_score > 0.1:
+            recommendation = "CAUTIOUS BUY"
+            recommendation_color = "lightgreen"
+            reasoning = "Moderate price growth with favorable sentiment"
+        elif price_change_pred < -2.0 and sentiment_score < -0.2:
             recommendation = "SELL"
             recommendation_color = "red"
-            recommendation_emoji = "📉"
-        elif price_change_pred > 2.0:
-            recommendation = "BUY (Strong Price Momentum)"
-            recommendation_color = "green"
-            recommendation_emoji = "🚀"
-        elif price_change_pred < -2.0:
-            recommendation = "SELL (Strong Price Decline)"
-            recommendation_color = "red"
-            recommendation_emoji = "🔻"
-        elif sentiment_score > 0.2:
-            recommendation = "BUY (Positive Sentiment)"
-            recommendation_color = "lightgreen"
-            recommendation_emoji = "😊"
-        elif sentiment_score < -0.2:
-            recommendation = "SELL (Negative Sentiment)"
+            reasoning = "Significant decline with negative sentiment"
+        elif price_change_pred < -1.0 and sentiment_score < -0.1:
+            recommendation = "CAUTIOUS SELL"
             recommendation_color = "orange"
-            recommendation_emoji = "😞"
+            reasoning = "Price decline with concerning sentiment"
+        elif price_change_pred > 1.5:
+            recommendation = "PRICE-BIASED HOLD"
+            recommendation_color = "lightblue"
+            reasoning = "Price growth expected but sentiment is neutral"
+        elif price_change_pred < -1.5:
+            recommendation = "PRICE-BIASED HOLD"
+            recommendation_color = "lightcoral"
+            reasoning = "Price decline expected but sentiment is neutral"
+        elif sentiment_score > 0.25:
+            recommendation = "SENTIMENT-BIASED HOLD"
+            recommendation_color = "lightblue"
+            reasoning = "Positive sentiment but weak price signal"
+        elif sentiment_score < -0.25:
+            recommendation = "SENTIMENT-BIASED HOLD"
+            recommendation_color = "lightcoral"
+            reasoning = "Negative sentiment but weak price signal"
         else:
             recommendation = "HOLD"
-            recommendation_color = "orange"
-            recommendation_emoji = "⚖️"
+            recommendation_color = "gray"
+            reasoning = "Insufficient signals for clear direction"
         
         # Display results
         col1, col2, col3 = st.columns(3)
@@ -618,13 +756,39 @@ class MemoryOptimizedNextTickApp:
         with col3:
             st.metric("Sentiment Score", f"{sentiment_score:.3f}")
         
-        # Basic recommendation
+        # Enhanced recommendation display
         st.markdown(f"""
         <div style='background-color: #f0f2f6; padding: 1.5rem; border-radius: 10px; border-left: 5px solid {recommendation_color}; margin: 1rem 0;'>
-            <h3 style='color: {recommendation_color}; margin: 0;'>{recommendation_emoji} Recommendation: {recommendation}</h3>
-            <p style='margin: 0.5rem 0 0 0;'>Based on AI prediction and market sentiment analysis</p>
+            <h3 style='color: {recommendation_color}; margin: 0;'>Recommendation: {recommendation}</h3>
+            <p style='margin: 0.5rem 0 0 0;'><strong>Reasoning:</strong> {reasoning}</p>
         </div>
         """, unsafe_allow_html=True)
+    
+    def _display_basic_prediction_results(self, predicted_price, current_price, sentiment_score, trend):
+        """Display basic prediction results for performance mode"""
+        price_change_pred = ((predicted_price - current_price) / current_price) * 100
+        
+        # Simple recommendation based on trend
+        if trend == "up" and sentiment_score > 0:
+            recommendation = "BUY"
+            color = "green"
+        elif trend == "down" and sentiment_score < 0:
+            recommendation = "SELL"
+            color = "red"
+        else:
+            recommendation = "HOLD"
+            color = "gray"
+        
+        # Display results
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric("Current Price", f"${current_price:.2f}")
+        
+        with col2:
+            st.metric("Predicted Price", f"${predicted_price:.2f}", f"{price_change_pred:+.2f}%")
+        
+        st.info(f"**Recommendation:** {recommendation} (Based on {trend} trend)")
     
     def _display_model_metrics(self, train_data, feature_columns):
         """Display model performance metrics"""
