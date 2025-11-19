@@ -145,62 +145,71 @@ class OptimizedSentimentAnalyzer:
         sentiments_finbert = []
         
         # Process articles with memory limits
-        max_articles = min(5, len(news_df))  # Limited for memory efficiency
+        max_articles = min(5, len(news_df))
         
         for _, article in news_df.head(max_articles).iterrows():
-            # Optimized text combination
-            title = str(article['title']).strip()
-            description = str(article.get('description', '')).strip()
-            
-            if len(description) > 20:
-                text = f"{title}. {description}"
-            else:
-                text = title
-                
-            text = text[:200]  # Reduced for memory
-            
-            # TextBlob sentiment (always available)
-            tb_sentiment = self.analyze_with_textblob(text)
-            sentiments_textblob.append(tb_sentiment)
-            
-            # FinBERT sentiment with memory protection
-            fb_sentiment, fb_label, fb_confidence = 0.0, "neutral", 0.0
             try:
+                # Extract article data with proper error handling
+                title = str(article.get('title', '')).strip()
+                description = str(article.get('description', '')).strip()
+                source = str(article.get('source', 'Unknown Source'))
+                published_at = str(article.get('published_at', 'Unknown Date'))
+                
+                # Skip if no meaningful content
+                if not title or len(title) < 5:
+                    continue
+                    
+                if len(description) > 20:
+                    text = f"{title}. {description}"
+                else:
+                    text = title
+                    
+                text = text[:200]  # Reduced for memory
+                
+                # TextBlob sentiment
+                tb_sentiment = self.analyze_with_textblob(text)
+                sentiments_textblob.append(tb_sentiment)
+                
+                # FinBERT sentiment
                 fb_sentiment, fb_label, fb_confidence = self.analyze_with_finbert(text)
-                if abs(fb_sentiment) > 0.1:  # Filter weak signals
+                if abs(fb_sentiment) > 0.1:
                     sentiments_finbert.append(fb_sentiment)
+                
+                # Calculate combined sentiment
+                if fb_sentiment != 0.0 and self._xformers_available:
+                    combined_sentiment = (tb_sentiment * 0.3) + (fb_sentiment * 0.7)
+                elif fb_sentiment != 0.0:
+                    combined_sentiment = (tb_sentiment * 0.4) + (fb_sentiment * 0.6)
+                else:
+                    combined_sentiment = tb_sentiment
+                
+                # Determine sentiment label
+                if combined_sentiment > 0.1:
+                    sentiment_label = "positive"
+                elif combined_sentiment < -0.1:
+                    sentiment_label = "negative"
+                else:
+                    sentiment_label = "neutral"
+                
+                # Ensure confidence is reasonable
+                confidence = max(fb_confidence, 0.5) if fb_confidence > 0 else 0.5
+                
+                article_sentiments.append({
+                    'title': title,
+                    'description': description if description else "No description available.",
+                    'source': source,
+                    'published_at': published_at,
+                    'textblob_sentiment': tb_sentiment,
+                    'finbert_sentiment': fb_sentiment,
+                    'finbert_confidence': fb_confidence,
+                    'sentiment': combined_sentiment,
+                    'label': sentiment_label,
+                    'confidence': confidence
+                })
+                
             except Exception as e:
-                print(f"FinBERT analysis skipped: {e}")
-            
-            # Calculate combined sentiment
-            if fb_sentiment != 0.0 and self._xformers_available:
-                # Higher weight for FinBERT when available
-                combined_sentiment = (tb_sentiment * 0.3) + (fb_sentiment * 0.7)
-            elif fb_sentiment != 0.0:
-                combined_sentiment = (tb_sentiment * 0.4) + (fb_sentiment * 0.6)
-            else:
-                combined_sentiment = tb_sentiment
-            
-            # Determine sentiment label
-            if combined_sentiment > 0.1:
-                sentiment_label = "positive"
-            elif combined_sentiment < -0.1:
-                sentiment_label = "negative"
-            else:
-                sentiment_label = "neutral"
-            
-            article_sentiments.append({
-                'title': title,
-                'description': description,
-                'source': article.get('source', 'Unknown'),
-                'published_at': article.get('published_at', 'Unknown'),
-                'textblob_sentiment': tb_sentiment,
-                'finbert_sentiment': fb_sentiment,
-                'finbert_confidence': fb_confidence,
-                'sentiment': combined_sentiment,
-                'label': sentiment_label,
-                'confidence': max(fb_confidence, 0.5)  # Default confidence if FinBERT failed
-            })
+                print(f"Error processing article: {e}")
+                continue
         
         # Calculate overall sentiment
         if article_sentiments:
